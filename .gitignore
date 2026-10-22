@@ -1,0 +1,42 @@
+# ── 凭据与运行账本（绝不能进仓库）──────────────────────────────
+credentials.json
+*.credentials.json
+quota.json
+replied.json
+state.json
+
+# 运行状态：数据目录已统一到 $DSH_HOME/myilidepu/，这里再兜一层 ——
+# 万一有人在仓库根目录直接跑 CLI（cwd 兜底），这些文件也不该被提交。
+myilidepu/
+night.json
+listen.json
+log.jsonl
+*.config.json
+!tests/fixtures/*.config.json
+
+# ── 她的日子（私人内容，绝不进仓库）────────────────────────────
+# 私人日记 = 只有主人能看；公开日记本地留痕也含她的原话。
+# 公开日记的「已发布到 B 站」这件事本身可以进仓库（dynamic id 不算隐私），
+# 但正文不行 —— 所以整份文件一律忽略。
+diary*.md
+her-diary*.md
+*.diary.md
+
+# ── 运行产物 ────────────────────────────────────────────
+shots/
+summaries/
+out/
+node_modules/
+*.mp4
+*.jpg
+*.png
+!examples/**/*.png
+
+# ── 本机/编辑器 ─────────────────────────────────────────
+.env
+.env.*
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.log

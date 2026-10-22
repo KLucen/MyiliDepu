@@ -1,0 +1,118 @@
+import test from 'node:test'
+import { wakePrompt } from '../lib/scheduler.js'
+import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { spawnSync } from 'node:child_process'
+import { resolveWorkDir } from '../lib/work-dir.js'
+import { resolveRuntime, probeRuntime } from '../tools/lib/runtime.mjs'
+import { execFileSync } from '../tools/lib/capture.mjs'
+import { makePlan, completePlan, historyOf } from '../tools/lib/night-plan.mjs'
+import { newReplies } from '../tools/lib/feedback.mjs'
+import { mentionSummaryLines } from '../lib/mention-summary.js'
+import { translateNamed } from '../tools/lib/cli-args.mjs'
+const temp = t => { const p=fs.mkdtempSync(path.join(os.tmpdir(),'whale-updates-'));t.after(()=>fs.rmSync(p,{recursive:true,force:true}));return p }
+test('issue 5: named positional arguments keep unrelated valued/boolean flags',()=>{
+  assert.deepEqual(translateNamed('recon',['--bvid','BV1234567890','--ps','5','--json']),['BV1234567890','--ps','5','--json'])
+  assert.deepEqual(translateNamed('search',['--page','2','--kw','猫','--json']),['猫','2','--json'])
+  assert.deepEqual(translateNamed('recon',['BV1234567890','--ps','5']),['BV1234567890','--ps','5'])
+})
+test('issue 10: summary requires opt-in, owner mention and explicit request',()=>{
+  const cfg={owner:{mid:'222'},listen:{mentionSummary:true}}
+  const item={kind:'at',mid:'222',source:'请总结这个视频',uri:'https://www.bilibili.com/video/BV1234567890'}
+  assert.equal(mentionSummaryLines({},[item]).length,0)
+  assert.equal(mentionSummaryLines(cfg,[{...item,mid:'999'}]).length,0)
+  assert.equal(mentionSummaryLines(cfg,[{...item,kind:'reply'}]).length,0)
+  assert.equal(mentionSummaryLines(cfg,[{...item,source:'你好'}]).length,0)
+  assert.match(mentionSummaryLines(cfg,[item]).join('\n'),/notify/)
+})
+test('issue 11/PR 13: configurable existing directory, invalid values fall back', t=>{
+  const dir=temp(t), fallback=path.join(dir,'default'), file=path.join(dir,'file');fs.writeFileSync(file,'x')
+  assert.equal(resolveWorkDir(dir,fallback),fs.realpathSync(dir))
+  let warnings=0
+  for(const v of ['relative',file,path.join(dir,'absent'),42,{}])assert.equal(resolveWorkDir(v,fallback,()=>warnings++),fallback)
+  for(const v of ['',null,undefined])resolveWorkDir(v,fallback,()=>warnings++)
+  assert.equal(warnings,5)
+})
+test('PR 12: resolve real node from PATH and verify execution', t=>{
+  const dir=temp(t)
+  const r=resolveRuntime(dir,{env:{PATH:path.dirname(process.execPath)},home:dir})
+  assert.equal(r.file,process.execPath);assert.equal(probeRuntime(r.file,r.env),true)
+})
+test('PR 12: Electron fallback requires proof and node environment', t=>{
+  const dir=temp(t), calls=[]
+  const opts={home:dir,env:{PATH:''},platform:'linux',electron:true,execPath:'/mock/electron',probe:(p,e)=>{calls.push([p,e]);return e.ELECTRON_RUN_AS_NODE==='1'}}
+  const r=resolveRuntime(dir,opts);assert.equal(r.env.ELECTRON_RUN_AS_NODE,'1');assert.equal(calls.length,1)
+  assert.throws(()=>resolveRuntime(dir,{...opts,probe:()=>false}),/node/)
+})
+
+test('PR 12: desktop-provided runtime is verified even without PATH', t=>{
+ const dir=temp(t), calls=[]
+ const r=resolveRuntime(dir,{home:dir,env:{PATH:'',DSH_DESKTOP_NODE_EXECUTABLE:process.execPath},probe:(p)=>{calls.push(p);return true}})
+ assert.equal(r.file,process.execPath);assert.deepEqual(calls,[process.execPath])
+})
+test('PR 3: file capture preserves stdout, error status and stderr',()=>{
+  assert.equal(execFileSync(process.execPath,['-e','process.stdout.write("hello")'],{encoding:'utf8'}),'hello')
+  assert.throws(()=>execFileSync(process.execPath,['-e','process.stdout.write("out");process.stderr.write("err");process.exit(7)']),e=>e.status===7&&String(e.stdout)==='out'&&String(e.stderr)==='err')
+})
+test('minimum gap survives reconfiguration, done state and subsequent ticks',()=>{
+  const now=new Date('2026-10-22T10:00:00').getTime()
+  const cfg={windows:[{start:'10:00',end:'10:05',wakes:3}],skipChance:0,minGapMin:10}
+  let state=completePlan(makePlan(cfg,{},now,()=>0),now)
+  state=historyOf(state,now+60000)
+  state=makePlan(cfg,state,now+60000,()=>0)
+  assert.equal(state.action,'done')
+  assert.equal(makePlan(cfg,state,now+120000,()=>0).action,'done')
+  const longer={...cfg,windows:[{start:'10:00',end:'11:00',wakes:3}]}
+  assert.ok(makePlan(longer,state,now+120000,()=>0).atMs>=now+600000)
+})
+test('invalid minimum gap cannot persist a NaN plan',()=>{
+  const now=new Date('2026-10-22T10:00:00').getTime()
+  const st=makePlan({windows:[{start:'10:00',end:'11:00',wakes:2}],minGapMin:'invalid'}, {},now,()=>0)
+  assert.ok(Number.isFinite(st.atMs))
+})
+test('issue 17: early morning selects morning window, future windows never execute early',()=>{
+  const cfg={windows:[{start:'18:00',end:'24:00',wakes:3},{start:'0:00',end:'8:00',wakes:3}]}
+  const st=makePlan(cfg,{},new Date('2026-10-22T02:38:00').getTime(),()=>0)
+  assert.equal(st.window,'0:00–8:00')
+  const future=makePlan(cfg,{},new Date('2026-10-22T09:00:00').getTime(),()=>0)
+  assert.ok(future.atMs>=future.startsAt)
+})
+test('issue 14: shrinking/reordered results and same-second replies are deduplicated',()=>{
+  const now=Date.now(), time=new Date(now-3600000).toISOString()
+  const a={id:'a',kind:'reply',time}, b={id:'b',kind:'reply',time}
+  const first=newReplies([a,b],{},now), fb={replyIds:first.ids,lastReplyTime:first.time}
+  assert.equal(newReplies([b],fb,now).fresh.length,0)
+  assert.equal(newReplies([b,a],fb,now).fresh.length,0)
+  assert.equal(newReplies([{...a,id:'c'}],fb,now).fresh.length,1)
+  assert.equal(newReplies([{...a,id:'old',time:new Date(now-7200000).toISOString()}],fb,now).fresh.length,0)
+})
+
+test('wake prompt follows night.maxVideos instead of a hard-coded 5',()=>{
+  const st={date:'2026-10-22',n:12}
+  for(const mv of [1,3,5]){
+    const lines=wakePrompt(st,'',mv).split(/\r?\n/)
+    const line=lines.find((l)=>l.includes('feed 选题'))
+    assert.ok(line, '提示里应该有 feed 选题 这一行')
+    assert.match(line,new RegExp('≤'+mv+' 条'),'maxVideos='+mv+' 时应显示 ≤'+mv+' 条，实际：'+line)
+  }
+  // 不传就按 5（向后兼容 ✓）
+  assert.match(wakePrompt(st,''),/≤5 条/)
+})
+
+test('wake prompt makes her read the transcript before writing the share',(t)=>{
+  const p=wakePrompt({date:'2026-10-22',n:12},'')
+  assert.match(p,/先把原文读完/,'默认应当在章程里加「先读原文再写」这一步')
+  assert.match(p,/只有看了原文才知道的细节/,'总结必须含一个只有看了原文才知道的细节')
+  assert.match(p,/shots[\\/]summaries/,'总结要落盘到 shots/summaries，下一轮才查得到')
+  // 配置可关（存了立刻生效 ✓）—— 得换一个进程，因为 configPath 在模块加载时就定了
+  const dir=temp(t)
+  const cfg=path.join(dir,'cfg.json')
+  fs.writeFileSync(cfg,JSON.stringify({understand:{shareSummary:false}}))
+  const r=spawnSync(process.execPath,['--input-type=module','-e',
+    "import {wakePrompt} from './lib/scheduler.js';process.stdout.write(wakePrompt({date:'2026-10-22',n:1},''))"
+  ],{cwd:path.resolve(import.meta.dirname,'..'),encoding:'utf8',env:{...process.env,BILI_WHALE_CONFIG:cfg}})
+  assert.equal(r.status,0,r.stderr)
+  assert.equal(/先把原文读完/.test(String(r.stdout)),false,'understand.shareSummary=false 时这一步应当整段消失')
+})

@@ -1,0 +1,22 @@
+# ============================================================================
+# dsh-myilidepu —— DSH bundle patch
+# ============================================================================
+# 插件挂载声明：DSH 启动时把本插件插进 profile 的配置树。
+#
+# 安装（本地开发，link 到源码目录）：
+#   dsh plugin --profile <profile> add "link:<源码目录>"
+# 例（Windows，把源码放在自己选的目录里）：
+#   dsh plugin --profile desktop add "link:C:\Users\<你>\.dsh\plugins\dsh-myilidepu"
+# 发布后也可以按包名装：
+#   dsh plugin --profile desktop add dsh-myilidepu
+#
+# 装完后必须**完全退出 DSH 再重新启动**（bundle 层只在启动时组装；只刷新页面不够）。
+# ⚠️ `name:` 必须与安装后的**包名**完全一致（这里是 dsh-myilidepu），否则表现为
+#    「装上了但设置页 404」。
+# 设置页：http://127.0.0.1:<DSH 端口>/dsh-myilidepu/（旧路径 /dsh-bili/ 保留为别名）；
+# 日常入口是 DSH 设置里的「我的分身」。
+# ============================================================================
+
+- insert:
+    - id: dsh-myilidepu
+      name: dsh-myilidepu
