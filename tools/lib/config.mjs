@@ -78,6 +78,20 @@ export const DEFAULTS = {
   footprint: { mentionOwner: true, minChars: 2 },
   // 视频理解：分享前必须真读过原文（2026-10-22 的 understandLines()）。
   understand: { required: true, shareSummary: true, viaHumanism: true },
+  // 模型与密钥（2026-10-22 主人要求「能够选择模型和 sk 密钥」）：
+  //   · provider/model/reasoningEffort 走 DSH 原生的会话级换模型（sessionController.selectModel），
+  //     **热生效、不用重启、也不改全局默认** —— 只影响她自己那个会话 ✓
+  //   · SK **绝不写进本文件**：只把「凭据引用名」（环境变量名，如 TENCENT_API_KEY）记在这里，
+  //     值走 DSH 自己的凭据库（ctx.credentials，经设置页写入，写后永不回显）✓
+  //   · enabled=false 时行为与以前完全一致（沿用 DSH 当前默认模型）✓
+  model: {
+    enabled: false,
+    provider: '',          // 例：tencent
+    model: '',             // 例：deepseek-v4.1-flash
+    reasoningEffort: '',   // 空 = 用该模型的默认档；否则 off|low|medium|high|max
+    apiKeyEnv: '',         // 凭据引用名（只记名字，不记值）
+    applyOnWake: true,     // 每次醒来前重新应用（换了模型/密钥不用重启）
+  },
 }
 
 export const merge = (base, over) => {
@@ -171,4 +185,5 @@ export function saveConfig(next) {
 // diary.*        双日记：私人（本地）与公开（B 站动态/评论）分开开关
 // footprint.*    足迹：评论 @主人 / 发动态，受 quota.shareDaily 约束
 // understand.*   理解：分享前必须先读原文（不是先看弹幕热度）
+// model.*         模型与密钥：用 DSH 原生会话级换模型；SK 只存凭据引用名，值在 DSH 凭据库
 export { HOME, dshPath }

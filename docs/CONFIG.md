@@ -163,6 +163,23 @@
 | `understand.shareSummary` | `true` | 布尔 | 分享前必须有一份自己写的总结 |
 | `understand.viaHumanism` | `true` | 布尔 | 读原文走 humanism 的阅读引擎（`read` / `journal`） |
 
+### 模型与密钥（`model`）—— 合并后新增
+
+| 键 | 默认值 | 取值 | 作用 |
+|---|---|---|---|
+| `model.enabled` | `false` | 布尔 | 是否给她指定模型。`false` = 沿用 DSH 当前默认模型（与以前完全一样） |
+| `model.provider` | `''` | provider id，如 `tencent` | 模型服务。列表来自 DSH 已挂载的 provider |
+| `model.model` | `''` | 模型 id，如 `deepseek-v4.1-flash` | 具体模型 |
+| `model.reasoningEffort` | `''` | `''` / `off` / `low` / `medium` / `high` / `max` | 推理档；空 = 用该模型自己的默认档。不在白名单的值会落成空 |
+| `model.apiKeyEnv` | `''` | 凭据引用名，如 `TENCENT_API_KEY` | **只记名字，不记值**。值在 DSH 凭据库（`~/.dsh/.credentials.yaml`） |
+| `model.applyOnWake` | `true` | 布尔 | 每次醒来前重新应用（换了模型/密钥不用重启 DSH） |
+
+三个要点：
+
+1. **换模型是会话级的**，走 DSH 原生 `sessionController.selectModel()` —— 只影响她自己那个会话（`myilidepu`），不动 DSH 的全局默认，也不影响你其他会话。
+2. **密钥永不落在这个文件里**。`model.apiKeyEnv` 只存「引用名」，值是设置页「模型与密钥」里写进 DSH 凭据库的；写入后不回显、也不出现在任何接口响应里。
+3. **不需要重启**：设置页点「保存并应用」会立刻调一次；`applyOnWake` 开着的话，每轮唤醒前还会再应用一次。
+
 ### 不写在 `DEFAULTS` 里、但会被读取的键
 
 | 键 | 用处 |
@@ -181,5 +198,8 @@
 | `lib/client.js`（设置页前端） | 设置页对应 section 重新加载后生效；不确定就重启 DSH |
 | `tools/**`（CLI 命令脚本） | 下一次 spawn 即生效（子进程每次新起） |
 | `cordis.patch.yml` | 完全退出 DSH 再启动 |
+
+> `model.*` 是例外：改完在设置页点「保存并应用」就**立刻生效**（DSH 原生会话级换模型），
+> 不用重启 DSH；`model.applyOnWake` 开着时每轮醒来前还会再应用一次。
 
 > 完整链路见 `docs/ARCHITECTURE.md`。

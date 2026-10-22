@@ -18,7 +18,8 @@ DSH 宿主进程
    │     └─ fetch /dsh-myilidepu/api/*（旧路径 /dsh-bili/api/* 是别名）
    ├─ HTTP 路由（全部过信任栅栏 + 只认本机回环）
    │     settings / cookie / persona / deps / pending / pending/reject /
-   │     pending/approve / notify-test / status / learn-status
+   │     pending/approve / notify-test / status / learn-status / model / model/key
+   │     （model / model/key：查模型目录 + 会话级换模型 + 写 SK 到 DSH 凭据库）
    ├─ lib/scheduler.js               ③ 生物钟
    │     ├─ tools/lib/night-plan.mjs  掷骰子 → 计划（何时醒 / 醒几次 / 看不看）
    │     ├─ tools/lib/night-config.mjs 读作息配置（每次重读，不吃缓存）
@@ -80,6 +81,17 @@ node tools/bili.mjs <命令> ...
   - 写配置只接受白名单顶层键，且后端再钳一遍范围；
   - 凭据只写不读回，接口只返回「有没有」。
 - `GET /dsh-myilidepu/api/settings` 同时返回 `health`（`configStatus()`：`path` / `ok` / `error` / `hadBom` / `migratedFrom`）——这是「改了配置没生效」的排查入口。
+
+## 模型与密钥（v1.1.0）
+
+- **换模型走 DSH 原生服务，插件不发模型请求**：`ctx.sessionController.selectModel({ sessionId, provider, model, reasoningEffort })`。
+  - `sessionId` 固定是她自己的会话 `myilidepu` → **只影响她**，不改 profile 的全局默认模型。
+  - `ctx.get('sessionController')` 缺失 / 没有 `selectModel` 时：保存配置照常成功，但 `applied=false` + `applyError` 说明原因（降级而不是 500）。
+- **模型目录是动态的**：`ctx.get('llm').listProviders()` / `listModels(id)` / `resolveModelInfo(provider, model).reasoning.efforts`。所以设置页的 provider / 模型 / 推理档都是下拉，不是写死枚举；`llm` 缺失时返回 `catalogError`、下拉灰掉。
+- **SK 只写不读回**：`ctx.get('credentials').set(ref, value)` / `unset(ref)` / `describe(ref)` → DSH 凭据库（`~/.dsh/.credentials.yaml`）。
+  - 插件配置里**只存引用名** `model.apiKeyEnv`（如 `TENCENT_API_KEY`），永不存值；
+  - 接口响应只回 `{configured, source}`，不回值；`tests/model.test.mjs` 里有「响应体与配置文件都不能出现密钥」的断言。
+- **生效时机**：设置页「保存并应用」→ 立即 `selectModel`；`model.applyOnWake !== false` 时 `lib/scheduler.js` 的 `applyModelOnWake()` 在每轮唤醒前再应用一次（失败只记日志、不阻断整轮）。
 
 ## 为什么改不同地方要用不同方式生效
 

@@ -1,3 +1,37 @@
+## v1.1.0（2026-10-22）模型与密钥
+
+新增「模型与密钥」：可以给她单独指定模型，也可以填自己的 API 密钥（SK）。
+
+### 新增：会话级换模型（不动全局默认）
+
+- 设置页新增 **模型与密钥** 一组：用指定模型（开关）、模型服务（provider）、模型、推理档、「每次醒来重新应用」。
+- 走 DSH 原生 `sessionController.selectModel()` —— **会话级、热生效**，只影响她自己那个会话（`myilidepu`），不改 DSH 的全局默认模型。
+- 模型目录是**动态的**：provider 列表和模型列表来自宿主已挂载的 `llm` 服务（`listProviders` / `listModels`），不是写死的枚举；推理档来自 `resolveModelInfo(...).reasoning.efforts`，拿到什么就显示什么。
+- 点「保存并应用」立刻切过去；开着 `model.applyOnWake` 时，每轮唤醒前会再应用一次（换了模型/密钥不用重启 DSH）。
+- 宿主缺 `llm` 服务时：下拉灰掉并在页面标「宿主不支持」，不白屏、不 500。
+
+### 新增：SK 密钥（只写不读回）
+
+- 设置页「模型与密钥」里填写**引用名**（环境变量名，如 `TENCENT_API_KEY`）+ 密钥值 → 写入 DSH 自己的凭据库（`~/.dsh/.credentials.yaml`，走 `ctx.credentials.set/unset/describe`）。
+- **安全约定**：密钥值只在写入那一刻经过内存；接口响应不回声、页面不显示、插件配置文件里只记引用名，永远不会有密钥值。
+- 删除密钥走 `unset`，同时清掉配置里的引用名。
+
+### 新增：配置项
+
+- `model.enabled`（默认 `false`）/ `model.provider` / `model.model` / `model.reasoningEffort` / `model.apiKeyEnv` / `model.applyOnWake`（默认 `true`）。
+- `model.*` 是「改完即生效」的例外：不重启 DSH，点保存并应用就切。
+
+### 接口
+
+- `GET /dsh-bili/api/model`（别名 `/dsh-myilidepu/api/model`）：provider 目录、模型列表、推理档（可用 `?provider=&model=` 查指定组合）、`suggestedRefs`、凭据「配没配」、各服务可用性。
+- `POST /dsh-bili/api/model`：保存 `model.*`；`apply: true` 时立刻应用，返回 `applied` / `applyError`。
+- `POST /dsh-bili/api/model/key`：`{ref, value}` 写入，`{ref, action:"unset"}` 删除；支持 `credentialRef` 格式校验。
+
+### 测试
+
+- 新增 `tests/model.test.mjs`（12 个用例，含假宿主 llm/credentials/sessionController）：验证目录透出、参数校验、只动自己的会话、密钥不回声也不落配置文件、旧路径别名、宿主缺服务时的降级。
+- 套件总数 100 → **112**，全过。
+
 ## v1.0.0（2026-10-22）合并版：MyiliDepu
 
 这一版把两个项目合成一个插件：**dsh-bili-whale**（身体：生物钟 / 看片 / 分享 / 两本日记 / 设置页 / 统一 CLI）与 **dsh-bili-humanism**（灵魂：读原文 → 理解 → 记见闻 → 长人格的 reading / ledger 引擎与提示词）。
