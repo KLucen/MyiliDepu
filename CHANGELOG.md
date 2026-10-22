@@ -1,3 +1,32 @@
+## v1.2.2（2026-10-23）修「用指定模型」勾不上
+
+设置页「模型与密钥」里那个「用指定模型」的勾**怎么点都勾不上**，provider / 模型 / 推理档选了也白选。
+
+### 事故：路径写法两套，`setPath` 只认一套
+
+- 设置页的配置读写有两个入口：FIELDS 表单传的是**数组**路径 `["diary","push"]`，
+  模型区传的是**点号字符串** `pick("model.enabled")`。
+- 而 `setPath()` 里写的是 `path[i]` —— 它把点号字符串当成数组用，
+  于是 `"model.enabled"` 被**逐字符**拆开，写成了
+  `cfg.m.o.d.e.l["."].e.n.a.b.l.e.d`。
+- 结果：`cfg.model` 永远不存在，`checked={!!m.enabled}` 永远是 `false`，
+  勾点下去值写到了垃圾键上 —— 表现就是「点不动」，而且**不会报错**。
+
+### 修复
+
+- `lib/client.js` 新增 `toPath(path)`：`Array.isArray(path) ? path : String(path).split(".")`，
+  在 `getPath()` / `setPath()` 这一处统一归一化（唯一真相），数组与点号两种写法都收。
+  模型区 8 个调用点（`model.enabled` / `provider` / `model` / `reasoningEffort` /
+  `applyOnWake` / `apiKeyEnv` / `service` / `effort`）一次性全好。
+- 新增 `tests/client-paths.test.mjs`（6 例）：把 `lib/client.js` 里
+  `toPath`/`getPath`/`setPath` 那段**真实源码**抽出来在 `vm.runInThisContext` 里跑，
+  逐个验证源码里真实出现过的所有 `pick("…")` 路径都落到顶层首段
+  —— 以后再写错写法，测试直接红。
+
+全量回归 **134 tests / 134 pass**。
+
+> 改的是设置页前端，**不用重启 DSH**：刷新一下设置页就是新版（约 0.5 秒热更新）。
+
 ## v1.2.1（2026-10-23）修「重启后会话全没了」
 
 v1.2.0 让数据目录能搬家，副作用是一个**致命启动错误**（真事故，已在本机复现并修掉）。
