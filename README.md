@@ -116,7 +116,7 @@ node <插件目录>/tools/bili.mjs selftest
 - **分享**：开关、通道（评论 / 私信）、评分门槛、沉默几天后降档。
 - **监听**：评论区监听开关与间隔、是否监听私信、是否监听直播间弹幕、只听你或所有人。
 - **日记与推送**：要不要推送日记摘要、主人 @ 请求总结（默认关）。
-- **工具链**：专用会话目录（必须是已存在的绝对路径）、工具目录、cookie 写入、依赖体检、待审回复。
+- **工具链**：专用会话目录（必须是已存在的绝对路径）、**数据目录**（可把她的全部数据搬到别的盘）、工具目录、cookie 写入、依赖体检、待审回复。
 - **通知**：`notify.type` 选 `none` / `desktop` / `webhook` / `command`，`template` 选 `text` / `markdown`。
 - **模型与密钥**：给她指定一个模型（provider + 具体模型 + 推理档），以及填 API 密钥（SK）。换模型走 DSH 原生的**会话级**切换 —— **只影响她自己那个会话**，不动 DSH 的全局默认，也不用重启 DSH（点「保存并应用」立刻换；开着「每次醒来重新应用」还会每轮再确认一次）。密钥由 DSH 自己的凭据库保存（`~/.dsh/.credentials.yaml`），**写后永不回显**，插件配置里只留一个引用名（如 `TENCENT_API_KEY`），配置文件里不会有密钥值。
 
@@ -124,8 +124,10 @@ node <插件目录>/tools/bili.mjs selftest
 
 - 配置：`$DSH_HOME/myilidepu.config.json`（`DSH_HOME` 默认 `~/.dsh`）。旧名 `bili-whale.config.json` 仍会自动兜底。
 - 凭据：`~/.bili-ai/credentials.json`（只写不回显，接口只告诉你「有没有」）。
-- 数据目录：`$DSH_HOME/myilidepu/`（日记、人格札记、账本、阅读结果都在这里）。
-- 想用别的路径：设环境变量 `MYILIDEPU_CONFIG`（旧 `BILI_WHALE_CONFIG` 也认）。
+- 数据目录：默认 `$DSH_HOME/myilidepu/`（两本日记、人格札记、见闻账本、阅读结果、抽帧、状态 JSON、她的会话工作区都在这里）。
+- **数据目录可以搬家**：在设置页「工具链 → 数据目录」填一个绝对路径（例 `D:\MyDepu`），或设环境变量 `MYILIDEPU_DATA_DIR`（优先级更高）。搬家后所有数据路径都跟着走，**改完要重启 DSH**（宿主在启动时算路径）。
+- 想换配置文件位置：设环境变量 `MYILIDEPU_CONFIG`（旧 `BILI_WHALE_CONFIG` 也认）。
+- 会话记录（`.jsonl.zstd`）仍由 DSH 自己保管在 `$DSH_HOME/sessions/`，子目录名由会话 cwd 决定 —— 数据目录搬家后她的会话 cwd 变成 `<数据目录>/work`，所以历史会话要跟着挪一次（插件不替你做这件事，见下）。
 
 **带 BOM 的坑已兼容**：手动改 JSON 时如果编辑器加了 UTF-8 BOM，读配置会自动剥掉并在设置页顶部标 `hadBom`；JSON 语法错、顶层不是对象也会在设置页顶部显示错误路径与原因，不会静默用默认值。设置页顶部还有一张「配置健康」卡：当前读的是哪份文件、有没有错、是不是从旧文件名迁移过来的。
 
@@ -210,7 +212,7 @@ node <插件目录>/tools/bili.mjs selftest
 
 ## 六、隐私
 
-- **数据都在本地**：配置在 `$DSH_HOME/myilidepu.config.json`，日记 / 人格札记 / 账本 / 阅读结果在 `$DSH_HOME/myilidepu/`，凭据在 `~/.bili-ai/credentials.json`。
+- **数据都在本地**：配置在 `$DSH_HOME/myilidepu.config.json`，日记 / 人格札记 / 账本 / 阅读结果在数据目录（默认 `$DSH_HOME/myilidepu/`，可用 `paths.dataDir` 搬走），凭据在 `~/.bili-ai/credentials.json`。
 - **会上传的只有你明确开启的公开动作**：视频下 @ 你的评论、私信、动态、公开日记。读接口会带着本机 cookie 访问 B 站，除此之外不往任何地方发数据。
 - 凭据只写不读回：设置页接口只返回「有没有 SESSDATA / bili_jct / buvid3」，不会回显内容；错误日志也不会打印凭据、签名 URL 或平台原始响应。
 - 没有云端、没有统计上报、没有第三方服务。公开仓库和测试只用合成数据与占位符，不含真实账号、真实视频 ID、个人项目故事或截图。

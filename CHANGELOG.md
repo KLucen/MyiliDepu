@@ -1,3 +1,27 @@
+## v1.2.0（2026-10-23）数据目录可搬家
+
+她的「整个生活」不再被钉死在 C 盘的 `~/.dsh/myilidepu/` 下。
+
+### 新增：`paths.dataDir`（数据目录可配置）
+
+- 优先级：`$MYILIDEPU_DATA_DIR`（环境变量）→ 配置里的 `paths.dataDir` → 默认 `$DSH_HOME/myilidepu`。
+- 一个键搬走**全部**数据：两本日记、见闻账本（SQLite）、人格札记 `human-world.md`、阅读原文 `readings/`、抽帧 `shots/`、收件箱、`night.json` / `listen.json` / `log.jsonl`、以及她的**会话工作区 `work/`**。
+- 解析集中在 `tools/lib/paths.mjs` 的 `resolveDataDir()`；`lib/index.js`、`lib/scheduler.js`、`tools/*` 此前各自拼 `path.join(DSH_HOME, 'myilidepu', ...)` 的 7 处已全部改成 `dataPath(...)`，不存在"改一处漏一处"。
+- 设置页「工具链」新增 **数据目录** 一格（留空 = 默认；填绝对路径 = 搬家），`GET /api/settings` 同时返回 `paths.dataDirSource`（`env` / `config` / `default`），排查"为什么还写在 C 盘"用。
+- ⚠️ **改完要重启 DSH**：宿主在启动时算路径。`tools/` 下的子进程每次现读配置，所以命令行工具会立刻跟着走，可能出现"命令行已经写 D 盘、插件还在写 C 盘"的短暂不一致，属预期。
+- ffmpeg 的放置提示也随之指向 `<数据目录>/bin/`。
+
+### 会话迁移（手动一步，文档已写）
+
+DSH 的会话记录在 `$DSH_HOME/sessions/--<cwd 归一化>--/<会话 id>/`，桶名由会话 cwd 决定。数据目录搬家后她的 cwd 变成 `<新数据目录>/work`，**旧会话要挪到新桶并改头行的 `cwd`**（否则 DSH 当成全新会话）。`docs/ARCHITECTURE.md` 写清了这件事；`lib/work-dir.js` 的 `resolveWorkDir()` 会跟着 `DATA_DIR` 走，不需要手改代码。
+
+### 测试
+
+- 新增 `tests/paths.test.mjs`（6 例）：默认值 / 配置生效 / 环境变量优先级 / BOM 配置 / 坏配置静默回落 / 相对路径解析。
+- 全量 `node --test "tests/*.test.mjs"` → **122 个用例全过**。
+
+---
+
 ## v1.1.0（2026-10-22）模型与密钥
 
 新增「模型与密钥」：可以给她单独指定模型，也可以填自己的 API 密钥（SK）。

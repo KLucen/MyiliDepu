@@ -46,7 +46,7 @@ items.push({
   name: 'ffmpeg（抽帧看画面）',
   ok: ff.ok,
   detail: ff.ok ? `${ff.version}\n  路径：${ff.path}` : (ff.path ? `找到了但跑不起来：${ff.version ?? ff.error}` : '没找到'),
-  fix: '① winget install ffmpeg  ② 或设环境变量 FFMPEG=路径  ③ 或放进 <仓库>/bin/ 或 ~/.dsh/myilidepu/bin/',
+  fix: '① winget install ffmpeg  ② 或设环境变量 FFMPEG=路径  ③ 或放进 <仓库>/bin/ 或 <数据目录>/bin/',
 })
 
 // ③ Node 版本（要 18+ 才有稳定 fetch）

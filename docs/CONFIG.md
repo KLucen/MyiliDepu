@@ -18,9 +18,9 @@
 | 东西 | 位置 |
 |---|---|
 | 凭据（cookie） | `~/.bili-ai/credentials.json`（本插件只写不回显；与配置分开存放） |
-| 数据目录 | `$DSH_HOME/myilidepu/`（会话工作目录在其中的 `work/`） |
+| 数据目录 | 默认 `$DSH_HOME/myilidepu/`（会话工作目录在其中的 `work/`）；可用 `paths.dataDir` 或 `$MYILIDEPU_DATA_DIR` 搬家 |
 | 旧数据目录 | `$DSH_HOME/whale-work`（从旧插件升级时沿用或迁移，取决于旧配置） |
-| 配置的只读接口 | `GET /dsh-myilidepu/api/settings`（返回 `config` + `health` + `configPath`） |
+| 配置的只读接口 | `GET /dsh-myilidepu/api/settings`（返回 `config` + `health` + `configPath` + `paths`） |
 
 ## 2. 三种改法
 
@@ -185,7 +185,8 @@
 | 键 | 用处 |
 |---|---|
 | `toolsPath` | 覆盖 `bili.mjs` 的位置（默认用插件自带的 `tools/bili.mjs`） |
-| `home` | 会话工作目录；留空 = `$DSH_HOME/myilidepu/work`，自定义时必须是已存在的绝对路径 |
+| `home` | 会话工作目录；留空 = `<数据目录>/work`，自定义时必须是已存在的绝对路径 |
+| `paths.dataDir` | **数据目录**（默认 `''` = `$DSH_HOME/myilidepu`）。填绝对路径即整体搬家：两本日记、见闻账本、阅读结果、抽帧、状态 JSON、会话工作区全跟着走。环境变量 `MYILIDEPU_DATA_DIR` 优先级更高。**改完要重启 DSH** |
 | `self.mid` / `self.name` | 她自己的 mid / 昵称（设置页只读展示，由登录态体检回填） |
 | `quota.daily` | 限额闸默认每天 2 条自主发言（读取处 `tools/commands/quota.mjs`，实际记录在 `~/.bili-ai/quota.json`） |
 

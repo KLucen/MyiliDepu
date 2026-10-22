@@ -1,5 +1,5 @@
 /**
- * 统一的路径解析（DSH home 与用户主目录）。
+ * 统一的路径解析（DSH home、用户主目录、**插件数据根目录**）。
  *
  * 为什么需要它：插件宿主半边（lib/index.js）用的是
  *   process.env.DSH_HOME || path.join(os.homedir(), '.dsh')
@@ -17,6 +17,7 @@
  */
 import os from 'node:os'
 import path from 'node:path'
+import fs from 'node:fs'
 
 /** 用户主目录（Windows 优先 USERPROFILE，保持与原实现一致）。 */
 export const HOME = process.env.USERPROFILE || process.env.HOME || os.homedir() || '.'
@@ -26,15 +27,6 @@ export const DSH_HOME = process.env.DSH_HOME || path.join(HOME, '.dsh')
 
 /** 拼一个位于 DSH home 下的路径。 */
 export const dshPath = (...parts) => path.join(DSH_HOME, ...parts)
-
-/** 插件数据目录：$DSH_HOME/myilidepu/（日记、账本、读过的原文、夜间状态都在这里）。 */
-export const DATA_DIR = dshPath('myilidepu')
-
-/** 拼一个位于插件数据目录下的路径。 */
-export const dataPath = (...parts) => path.join(DATA_DIR, ...parts)
-
-/** 拼一个位于用户主目录下的路径（.bili-ai 等凭据/状态目录用）。 */
-export const homePath = (...parts) => path.join(HOME, ...parts)
 
 /**
  * 插件配置文件（合并后改名 myilidepu.config.json）。
@@ -54,5 +46,59 @@ export const configPath =
 /** 旧版配置文件位置（只用于迁移兜底，永远不写入）。 */
 export const legacyConfigPath = dshPath('bili-whale.config.json')
 
-/** Credentials are per OS user, independent of DSH_HOME. */
+/**
+ * 数据目录的三种来源（2026-10-23 新增：支持把她的"整个生活"搬到别的盘）。
+ *
+ * 为什么要可配置：默认数据（两本日记 / 见闻账本 / 抽帧 / 读过的原文 / 会话工作区）
+ * 都堆在 C:\Users\<你>\.dsh\myilidepu 下，占 C 盘空间。现在可以整体搬到
+ * 例如 D:\MyDepu；**代码里所有数据路径都从 DATA_DIR 派生**，不需要改第二处。
+ *
+ * 解析优先级：
+ *   ① $MYILIDEPU_DATA_DIR（环境变量；多实例/CI/便携场景用，优先级最高）
+ *   ② 配置文件里的 `paths.dataDir`（设置页「工具链 → 数据目录」写的那一格）
+ *   ③ 默认 `$DSH_HOME/myilidepu`
+ *
+ * 为什么在这里直接读配置文件、而不是 import config.mjs：
+ *   config.mjs 反过来要 import 本文件（configPath / dshPath / HOME），
+ *   直接 import 会形成循环依赖，而 ESM 的顶层 const 在循环里会拿到 undefined。
+ *   这里只做一次 readFileSync + JSON.parse（几 KB），开销可忽略。
+ */
+function dataDirFromConfig() {
+  try {
+    const raw = fs.readFileSync(configPath, 'utf8')
+    const body = raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw   // 剥 BOM（记事本/PowerShell 5.1 存的配置带 BOM）
+    const v = JSON.parse(body)?.paths?.dataDir
+    return typeof v === 'string' && v.trim() ? v.trim() : ''
+  } catch { return '' }
+}
+
+/** 解析数据根目录（便于测试；不创建目录）。 */
+export function resolveDataDir() {
+  const env = String(process.env.MYILIDEPU_DATA_DIR ?? '').trim()
+  if (env) return path.resolve(env)
+  const cfg = dataDirFromConfig()
+  if (cfg) return path.resolve(cfg)
+  return dshPath('myilidepu')
+}
+
+/** 数据目录来源：env | config | default（设置页/日志里显示，排查"为什么还写在 C 盘"）。 */
+export function dataDirSource() {
+  if (String(process.env.MYILIDEPU_DATA_DIR ?? '').trim()) return 'env'
+  if (dataDirFromConfig()) return 'config'
+  return 'default'
+}
+
+/**
+ * 插件数据根目录：日记、账本、读过的原文、抽帧、夜间/监听状态、她的会话工作区都在这里。
+ * 默认 `$DSH_HOME/myilidepu/`，可用 `paths.dataDir` / `$MYILIDEPU_DATA_DIR` 搬走。
+ */
+export const DATA_DIR = resolveDataDir()
+
+/** 拼一个位于插件数据目录下的路径。 */
+export const dataPath = (...parts) => path.join(DATA_DIR, ...parts)
+
+/** 拼一个位于用户主目录下的路径（.bili-ai 等凭据/状态目录用）。 */
+export const homePath = (...parts) => path.join(HOME, ...parts)
+
+/** Credentials are per OS user, independent of DSH_HOME（凭据不跟着数据目录走 ✓）。 */
 export const credentialsPath = homePath('.bili-ai', 'credentials.json')

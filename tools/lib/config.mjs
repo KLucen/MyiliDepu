@@ -78,6 +78,11 @@ export const DEFAULTS = {
   footprint: { mentionOwner: true, minChars: 2 },
   // 视频理解：分享前必须真读过原文（2026-10-22 的 understandLines()）。
   understand: { required: true, shareSummary: true, viaHumanism: true },
+  // 数据目录（2026-10-23 主人要求「把她的会话/内容搬到 D 盘」）：
+  //   '' = 默认 $DSH_HOME/myilidepu（跟着 DSH home 走）；填绝对路径 = 整体搬家，
+  //   日记 / 见闻账本 / 抽帧 / 读过的原文 / 状态 JSON / 她的会话工作区全跟着走 ✓
+  //   ⚠️ 改完要**重启 DSH** 才生效（宿主半边在启动时算路径；tools/ 子进程每次现读配置 ✓）
+  paths: { dataDir: '' },
   // 模型与密钥（2026-10-22 主人要求「能够选择模型和 sk 密钥」）：
   //   · provider/model/reasoningEffort 走 DSH 原生的会话级换模型（sessionController.selectModel），
   //     **热生效、不用重启、也不改全局默认** —— 只影响她自己那个会话 ✓

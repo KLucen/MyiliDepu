@@ -24,10 +24,10 @@ DSH 宿主进程
    │     ├─ tools/lib/night-plan.mjs  掷骰子 → 计划（何时醒 / 醒几次 / 看不看）
    │     ├─ tools/lib/night-config.mjs 读作息配置（每次重读，不吃缓存）
    │     ├─ sessionController.prompt(...)  叫醒会话 "myilidepu"
-   │     │     cwd = $DSH_HOME/myilidepu/work
+   │     │     cwd = <数据目录>/work（默认 $DSH_HOME/myilidepu/work）
    │     └─ 监听器：评论区（tools/commands/comment-await.mjs）、
    │                私信（dm-await.mjs）、直播间弹幕（danmaku-await.mjs）
-   └─ 数据：$DSH_HOME/myilidepu/（会话工作目录 work/ + SQLite 账本）
+   └─ 数据：<数据目录>/（默认 $DSH_HOME/myilidepu/；会话工作目录 work/ + SQLite 账本）
 
 被叫醒的 agent 每一轮自己 spawn 命令（④）：
 node tools/bili.mjs <命令> ...
@@ -55,11 +55,13 @@ node tools/bili.mjs <命令> ...
 |---|---|
 | 配置 | `$DSH_HOME/myilidepu.config.json`（旧 `bili-whale.config.json` 兜底） |
 | 凭据 | `~/.bili-ai/credentials.json`（只写不回显；reading 引擎复用同一份） |
-| 数据目录 | `$DSH_HOME/myilidepu/` |
-| 会话工作目录 | `$DSH_HOME/myilidepu/work/`（可用 `home` 改，但必须是已存在的绝对路径） |
+| 数据目录 | 默认 `$DSH_HOME/myilidepu/`；可被 `paths.dataDir`（配置）或 `$MYILIDEPU_DATA_DIR`（环境变量）改写 —— 解析在 `tools/lib/paths.mjs` 的 `resolveDataDir()`，所有数据路径都从它派生 |
+| 会话工作目录 | `<数据目录>/work/`（可用 `home` 改，但必须是已存在的绝对路径） |
 | 见闻 / 人格 / 收件箱账本 | 数据目录下的 SQLite（`ledger.sqlite`，见 `lib/reading/store.mjs`） |
 | 原始阅读结果 | 数据目录下的 `readings/<id>.json` |
 | 日记 / 收藏 / 额度等旧状态 | 沿用 whale 的位置（`~/.bili-ai/`、`~/.dsh/` 下的 md / json / jsonl 文件） |
+
+> **搬家注意**：DSH 的会话记录在 `$DSH_HOME/sessions/--<按 cwd 归一化的目录名>--/<会话 id>/`，目录名由会话 cwd 决定。数据目录搬家后 cwd 变成 `<新数据目录>/work`，**旧会话文件要跟着挪到新桶并改掉头行里的 `cwd`**，否则 DSH 认不出来（会当成一个全新会话）。插件本身不替用户做这步。
 
 > 以上目录都在本机；除了你在设置里明确开启的公开动作（分享、公开日记、评论/动态/私信），没有数据上传到第三方。
 

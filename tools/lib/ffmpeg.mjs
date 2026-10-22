@@ -15,7 +15,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { execFileSync } from './capture.mjs'
-import { dshPath } from './paths.mjs'
+import { dshPath, dataPath } from './paths.mjs'
 
 
 const EXE = process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg'
@@ -53,7 +53,7 @@ export function ffmpegPath() {
     process.env.FFMPEG,
     onPath(),
     path.join(ROOT, 'bin', EXE),
-    dshPath('myilidepu', 'bin', EXE),
+    dataPath('bin', EXE),
     ...jianyingCopies(),
   ]
   return cands.find(exists) ?? null
@@ -66,7 +66,7 @@ export function requireFfmpeg() {
     '找不到 ffmpeg（抽帧/看画面需要它）。任选一种解决：',
     '  ① 装一个：winget install ffmpeg   （或 scoop install ffmpeg / brew install ffmpeg）',
     '  ② 用环境变量指定：set FFMPEG=D:\\path\\to\\ffmpeg.exe',
-    `  ③ 把它放到 ${path.join(ROOT, 'bin', EXE)} 或 ${dshPath('myilidepu', 'bin', EXE)}`,
+    `  ③ 把它放到 ${path.join(ROOT, 'bin', EXE)} 或 ${dataPath('bin', EXE)}`,
   ].join('\n'))
 }
 
