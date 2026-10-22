@@ -235,3 +235,28 @@ node <插件目录>/tools/bili.mjs selftest
 - **必须用真 node 运行时**：宿主主程序是 Electron 时不能用它跑命令，插件会自己找 node（找不到在 `deps` / 设置页报错，可用 `DSH_NODE` 指定）。
 - **无界面（headless）DSH 不工作**：缺 `sessionController` / `webServer` / `connection` 时插件会一直 pending。
 - **没做的还有**：人格的模型权重训练（当前学习只落本地札记）、跨插件共享账号锁/配额/暂停、真实账号的公开演示。公开测试和示例永远是合成数据。
+
+## 九、出事了怎么救
+
+### 「重启后会话全没了」
+
+症状：DSH 一启动，左侧会话列表空的；日志里 `workspaceController is unavailable`，
+`dsh-myilidepu` 显示 `pending (waiting for services: sessionController, webServer, connection)`。
+
+原因：DSH 的会话按 **cwd** 分桶（`$DSH_HOME/sessions/--<工作目录>--/<会话 id>/`），
+她的会话 id 是固定的。**数据目录搬过家**（改了 `paths.dataDir`）之后，同一个 id 在两个桶里各有一份，
+`dsh-workspace` 扫描到重复 id 直接抛 `duplicate JSONL session id ... appears in multiple project directories`
+→ `workspaceRegistry` 不激活 → 下游全 pending。注意它是**上一次运行造出来、下一次启动才炸**。
+
+现行版本（v1.2.1+）已自动处理：`ensureSession()` 在建会话前后各查一次，
+留下 cwd 相符的那一份，其余**搬**进 `<数据目录>/.orphan-sessions/`（只搬不删）。
+
+万一还是撞上了（比如重复是在旧版本里造出来的），手动救：
+
+1. 在 `$DSH_HOME/sessions/` 下找出所有叫这个 id 的目录：
+   `Get-ChildItem "$env:USERPROFILE\.dsh\sessions" -Recurse -Directory -Filter myilidepu`
+2. 看**新数据目录对应的那个桶**（桶名就是工作目录编码，`D:\MyDepu\work` → `--D-MyDepu-work--`）留着，
+   其余整目录**移动**（别删）到别处。
+3. 重扫一遍确认全局唯一，再启动 DSH。
+
+数据本身不会丢：会话文件是 `session.v4.jsonl.zstd`，搬走的那份随时能搬回。

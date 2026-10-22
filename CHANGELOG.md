@@ -1,3 +1,38 @@
+## v1.2.1（2026-10-23）修「重启后会话全没了」
+
+v1.2.0 让数据目录能搬家，副作用是一个**致命启动错误**（真事故，已在本机复现并修掉）。
+
+### 事故：`duplicate JSONL session id ... appears in multiple project directories`
+
+- DSH 的会话按 **cwd** 分桶存放：`$DSH_HOME/sessions/--<工作目录>--/<会话 id>/session.v4.jsonl.zstd`。
+  她的会话 id 是固定的 `myilidepu`，而 v1.2.0 把工作目录从
+  `C:\Users\KLucen\.dsh\myilidepu\work` 换成了 `D:\MyDepu\work`。
+- 结果：同一个 id 在两个 project 目录里各有一份。**下一次** DSH 启动时 `dsh-workspace`
+  扫描全部会话头、撞见重复 id 直接抛错 →
+  `workspaceRegistry` 永不激活 → `workspaceController` / `sessionController` 全部 `pending`，
+  界面上表现成「会话全没了」，并且连带 `dsh-myilidepu` 自己也起不来（`pending (waiting for services: …)`）。
+- 触发窗口很阴：重复是**上一次运行**造出来的，所以改完配置当时一切正常，重启才炸。
+
+### 修复：启动即去重（只搬不删）
+
+- 新增 `lib/session-home.js`：读会话文件**第一帧**（zstd 流的首帧就是 header，里面带 `id` 和 `cwd`），
+  扫描所有 project 桶，找出同名会话的全部副本。
+- `lib/scheduler.js` 的 `ensureSession()` 现在在建会话**前后各查一次**：
+  留下 `cwd` 与当前工作目录相符的那一份（都对不上时留 mtime 最新的），
+  其余**移动**到 `<数据目录>/.orphan-sessions/<时间戳>/<原桶>/<会话 id>/` ——
+  绝不删除，随时可以搬回；每次动作都写进 `log.jsonl`。
+- 顺带把 `findSessionFile()` 的判定从「路径里含 `myilidepu`」收紧成
+  「父目录名 == 会话 id」，搬家后旧桶不会再被误认成"她的会话文件"。
+- 新增 `tests/session-home.test.mjs`（6 例，用真 zstd 帧）：首帧解析、单份不动、
+  两份重复留 cwd 相符者、cwd 都对不上时退化留最新、三份（含坏文件）收敛成一份、
+  `sessions/` 不存在时安静返回。
+
+### 测试
+
+- 全量 `node --test "tests/*.test.mjs"` → **128 个用例全过**（v1.2.0 是 122）。
+
+---
+
 ## v1.2.0（2026-10-23）数据目录可搬家
 
 她的「整个生活」不再被钉死在 C 盘的 `~/.dsh/myilidepu/` 下。
