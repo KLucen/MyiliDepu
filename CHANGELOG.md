@@ -1,3 +1,100 @@
+## v1.3.5（2026-10-23）关注名单自动同步：你在 B 站关注了谁，她自己知道
+
+主人（m04389）：「以后我会直接用她的账号关注up主，监测到有新关注就按格式写进配置」
+
+这句话把边界划得很清楚，也正是这版实现的原则：
+
+- **关注动作由主人做**，在 B 站客户端/网页上点。插件**只读**关注列表
+  （`x/relation/followings`，WBI 签名 + 她的 cookie + 关注页 Referer），
+  一行"点关注/取关"的代码都没有 —— 那是改账号状态的动作，手册第 3 节禁止自动做。
+- **发现新关注 → 按格式写进配置**：追加进 `watchups`，形如
+  `{ "name": "析构万理的发条精灵", "mid": "190973118", "topics": [] }`
+  —— 和主人手写的条目完全同构，`feed` 那边一个字都不用改就认得。
+- **只增不减、只补不改**：已存在条目的 `topics` 一个字都不动（主人手写的最优先）；
+  取关只报告、**不**从 `watchups` 删（主人可能还想让她继续看那位的稿子）。
+
+### 1 · 新模块 `tools/lib/follows.mjs`
+
+| 函数 | 干什么 | 为什么这么切 |
+| --- | --- | --- |
+| `fetchFollowings({get,headers,vmid,pageSize,maxPages})` | 拉关注列表，`{total,list:[{mid,name,mtime}],pages,complete}` | 要 WBI 签名：不签这个接口会回 `-403/-352`，而它的报错文案和"没登录"几乎一样，最容易误判成凭据坏了 |
+| `readSeen` / `writeSeen` | 关注快照（`~/.bili-ai/follows-seen.json`） | B 站只告诉你"现在关注了谁"，不告诉你"新增了谁" —— 必须自己存一份上次的 |
+| `diffFollows(seen, now)` | 纯函数：多了谁、少了谁 | mid 统一按**字符串**比：配置里写数字 `12345`、接口回 `"12345"`，不统一就会静默判成"新人" ✗ |
+| `mergeWatchUps(existing, added, {topics,max})` | 纯函数：把新增并进 `watchups` | 复用 `normalizeWatchUps` 的去重口径（同 mid **或**同名都算已存在），所以主人手写的无 mid 条目也不会被重复添加 |
+| `syncFollows(opts)` | 一条龙：拉 → 比 → 并 →（非 dry 时）写配置 + 更新快照 | **永不抛**：它挂在她的唤醒链路上，风控/断网/未登录都只能"这轮名单没更新"，不能变成"她今天醒不过来" ✗ |
+
+快照被截断时（关注列表超过 4 页）**不整体替换**，而是"老的 + 新的"求并集 ——
+否则没读到的人会被误判成"取关"，虽然我们不会删条目，但报告会变得不可信。
+
+### 2 · 新命令 `bili follows`
+
+```
+node bili.mjs follows list                     # 她账号现在关注了谁（只读）
+node bili.mjs follows sync                     # 默认 dry：只说要写什么
+node bili.mjs follows sync --go                # 真写进配置
+node bili.mjs follows sync --topics "a,b" --max 3
+```
+
+退出码：`0` 正常 · `2` 用法/参数错 · `3` 读不到（未登录 / 风控 / 网络）。
+和其它会改东西的命令一样**默认 dry**：错误的手滑不该改任何东西。
+
+### 3 · 宿主：后台同步，**绝不 await**（`lib/scheduler.js`）
+
+- `tick()` **最开头**调 `kickFollowsSync()`：节流 5 分钟、并发保护（上一轮没跑完就不再踢），
+  结果不回传本轮，而是存进 `followsNote` 留着下一次醒来用（`takeFollowsNote()` 取走即清空）。
+- 有新增时：① 写进配置 ② 下一次醒来的提示里多一句
+  「【重点关注名单刚更新】主人替你关注了：X（已写进配置，别自己改配置）」。
+- 失败静默：`log('[myilidepu] 关注同步跳过：…')`，不影响她任何一轮。
+
+> **回归测试抓出来的一版真 bug（已修，值得单独记一笔）**
+> 第一版把 `await syncFollowsOnWake()` 写在唤醒路径里（投递提示词之前）。
+> 后果是 `tests/integration.test.mjs` 的调度器用例直接挂死：
+> `Detected unsettled top-level await at tests/helpers/scheduler.mjs:28`、退出码 13 ——
+> `await sched.tick()` 永不返回。
+>
+> 根因不在测试，在代码：`tick()` 的 `waking` 标志只在 `finally` 里落下，
+> 而**网络请求没有总时限** —— 一旦接口卡住，`await` 不返回 ⇒ `waking` 永远为 `true`
+> ⇒ 生物钟从此不再醒来。测试里是 mock 的 `/nav` 不返回 `wbi_img` 让请求链悬住，
+> 真机上是弱网/风控超时，症状一模一样，而且是**静默**的（只在日志里少一行"已投递"）。
+>
+> 两处一起修：
+> 1. `syncFollows()` 加总时限（默认 20s，`Promise.race` + `unref()` 的定时器，
+>    超时返回 `{ok:false, code:'TIMEOUT'}` 而不是抛），本体挪到 `syncFollowsInner()` 便于单测直驱。
+> 2. 宿主侧改成 fire-and-forget（本节所述）—— 她的醒来一秒都不该等记账。
+>
+> 教训：**挂在定时循环里的 await，必须问一句"它不返回会怎样"。**
+
+### 4 · 设置页与文档
+
+- 设置页「重点关注的 UP」增加两行：**自动同步她的关注**（开关，`follows.enabled`）、
+  **新关注的默认汇报重点**（`follows.topics`）。名单本身的编辑方式没变。
+- `docs/CONFIG.md` 补 `follows.enabled` / `follows.topics` / `follows.maxAdd` 三行。
+- `prompts/AGENTS.md` 1.2 节写明：名单会自己变长，看到「重点关注名单刚更新」**不用她动手**，
+  也不许去点关注/取关或改配置。
+- `tests/follows.test.mjs` 新增 **17 例**（纯函数 + 假 `get` 的分页/风控/未登录/fake 配置，
+  全程不碰网络与真实配置）。
+
+### 5 · 本机实跑
+
+```
+$ node tools/bili.mjs follows list
+她（uid 3747573946911655）现在关注 2 位：
+   1. 黑鸦Heya  3706929260006322  · 关注于 2026-10-22
+   2. 析构万理的发条精灵  190973118  · 关注于 2026-10-22
+
+$ node tools/bili.mjs follows sync --go
+新增 1 位 → 已写进配置 watchups：
+    + 析构万理的发条精灵  190973118  ✓
+  · 跳过 黑鸦Heya：名单里已经有了（或你手写过同名）
+  ✓ 已写进配置：watchups 共 2 条
+
+$ node tools/bili.mjs follows sync --go     # 再跑一次
+  没有新关注。
+  ✓ 快照已更新（配置没变）
+```
+
+配置备份：`~/.dsh/myilidepu.config.json.bak-2026-10-23-follows`。
+
 ## v1.3.4（2026-10-23）主人 @ 她时区分「想学 / 口味 / 其他」+ 日期限制只管她自己的选题
 
 主人（m04178）一次提了两件事：① 在评论区 @ 她时，要能区分"我想学某样东西、要她帮我总结"／

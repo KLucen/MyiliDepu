@@ -46,6 +46,7 @@ const map = {
   // —— 写（会真的发出去；都必须显式 --dry 或 --go） ——
   'dm-await': ['commands/dm-await.mjs', '私信监听（只认主人；命中打印 DM_HIT）· --once --json --peek 单次取一封'],
   feedback: ['commands/feedback.mjs', '反馈账（本地只读/追写）：主人说喜欢/不喜欢 → list / like|dislike --note "…" [--bv BV] [--title "…"]；feed 选题按它加权降权'],
+  follows: ['commands/follows.mjs', '关注名单同步（只读 B 站，只写本地配置）：list / sync [--go] —— 主人用她的号关注了谁 → 自动写进 watchups'],
   fav: ['commands/fav.mjs', '收藏（我想留着）：判据强制 · --list / --check / <BV> --reason … --dry|--go'],
   dm: ['commands/dm.mjs', '私信（专属通道）：一天只锁定 1 个收信人（对这个人数不限）· 只发主人 · 必须互关'],
   comment: ['commands/comment.mjs', '发一条视频评论；带 --root/--parent 就是二级回复'],

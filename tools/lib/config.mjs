@@ -51,6 +51,13 @@ export const DEFAULTS = {
   //   · mid 可以不填（只给昵称）：feed 会按昵称查一次 mid（查不到就这一轮跳过，不猜）
   //   · topics 是**汇报重点**：命中主题的稿子额外加权；她 at 主人时也照这几条讲 ✓
   watchups: [],
+  // 关注同步（2026-10-23 主人要求：「以后我会直接用她的账号关注up主，监测到有新关注就按格式写进配置」）：
+  //   · 关注动作主人在 B 站自己做；插件**只读**关注列表（x/relation/followings），
+  //     发现新关注就按 { name, mid, topics } 追加进上面的 watchups ✓
+  //   · 只增不减：取关只报告，不会把条目从 watchups 删掉（主人可能还想让她继续看那位的稿子）
+  //   · topics 是**给新条目**套的默认汇报重点（已有的条目一个字都不动）
+  //   · maxAdd：一次最多写几条（防某天关注了几百人把配置撑爆；剩下的下一轮继续）
+  follows: { enabled: true, topics: [], maxAdd: 10 },
   notify: { type: 'none', url: '', template: 'text', cmd: '' },   // none | desktop | webhook | command（见 commands/notify.mjs）
   aliases: [],                  // 历史昵称（兜底用；当前昵称仍从 nav 动态读）
   // 使用者本人（分享型评论要 @ 的人）：mid 用于白名单/查询，name 用于正文里的 @昵称
