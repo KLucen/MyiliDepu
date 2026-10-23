@@ -31,7 +31,7 @@ const map = {
   debrief: ['commands/debrief.mjs', '看懂一条视频（一条龙）：封面+简介+官方字幕+弹幕热区(对齐字幕)+热评+画面抽帧：<BV> [--bucket 30] [--top 5] [--grid 3x3] [--no-frames]'],
   frames: ['commands/frames.mjs', '看一眼画面（轻量抽帧：直链 seek，**不下载整片**）→ 出九宫格 SHEET 交给 read_image：<BV|URL> [--n 9] [--grid 3x3] [--at 12,45,90] [--json]'],
   comments: ['commands/comments.mjs', '热评 / 最新评论（只读，匿名可读）：<BV> [--ps 20] [--pn 1] [--sort hot|time] [--json] —— 日报挑片只要"标题+热评"时用它，比 debrief 轻'],
-  feed: ['commands/feed.mjs', '选题器（只读）：照日记里的「爱看」捞候选，排除看过的/已评论过的：<BV> [--n 6] [--per 2]'],
+  feed: ['commands/feed.mjs', '选题器（只读）：照日记里的「爱看」捞候选，排除看过的/已评论过的：<BV> [--n 6] [--per 2]；主人点名看某个话题/类型 → --topic "关键词"（不受发布时间限制）'],
   quota: ['commands/quota.mjs', '限额闸（B 档「限额自主」的代码强制部分）：status / check --auto|--share / record / set --daily N / allow <范围>'],
   likes: ['commands/likes.mjs', '谁赞了她（「收到的赞」通知流，含点赞者 mid/昵称）：--hours 24 [--owner] [--json]'],
   selftest: ['commands/selftest.mjs', '启动测试（装完先跑这个）：配置/凭据/登录态/目录/ffmpeg + 下一步三件事（未分组会话 · 完全权限 · headless 为什么 pending）；加 --real 再跑「真机十二问」（真账号真接口，全只读）'],

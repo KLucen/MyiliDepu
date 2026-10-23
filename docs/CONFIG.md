@@ -67,7 +67,7 @@
 | `preferences.dislike` | `["带货","擦边","标题党","纯搬运"]` | 字符串数组 | 排除 / 降权的信号 |
 | `preferences.publishedAfter` | `""` | `""` 或 `YYYY-MM-DD` | 「只看这天（含）之后发布的视频」。空 = 不限 |
 
-`publishedAfter` 同时管两条通路 —— 她自己的选题（`feed`）与学习候选（`candidates`）—— 两边共用同一个判断（`tools/lib/pubdate.mjs`），不会出现「一个入口过滤了、另一个没过滤」的静默不一致。
+`publishedAfter` 同时管两条**她自己发起**的通路 —— 选题（`feed`）与学习候选（`candidates`）—— 两边共用同一个判断（`tools/lib/pubdate.mjs`），不会出现「一个入口过滤了、另一个没过滤」的静默不一致。
 
 语义（故意保守）：
 
@@ -75,6 +75,10 @@
 - **拿不到发布日期的条目会被丢掉**，但在输出里会念出条数（`日期过滤「… 之后」：109 条里留下 81 条，更早丢掉 28 条`）——不是静默丢。
 - **写法非法会在命令里当场报错**（`INVALID_DAY`，退出码 2）。宁可当场停下，也不要让人以为「设上了」其实一条都没过滤。
 - **只管「她自己挑什么看」**：评论区/私信里别人直接递到她面前的视频不受这条约束。
+- **主人点名不受这条限制**（2026-10-23 补）：`node bili.mjs feed --topic "<关键词>"` 是主人直接要看某个话题/类型，
+  这一轮**不套** `publishedAfter`（等价于临时放开；也可以用 `--any-date` 显式放开而不给话题）。
+  判断在 `scopeOfDate(configured, { ownerPicked })` 里，输出会写明「主人点名（--topic / --any-date）：这一轮不套…限制」，
+  不会静默跳过。
 
 ### 通知（`notify`）
 
@@ -200,7 +204,7 @@
 | `self.mid` / `self.name` | 她自己的 mid / 昵称（设置页只读展示，由登录态体检回填） |
 | `watchups` | **重点关注的 UP**：`[{ name, topics }]`（`name` 必填，`mid` 可省 → 按昵称查一次）。命中 `topics` 的稿子额外加权；她 at 主人时也照这几条讲。**不是"去关注他"**——按 mid 直拉公开投稿，不产生任何对外动作 |
 | `listen.dmWake` | `true` = 每次生物钟醒来**先看一封主人的私信**再去看片（只读 `--peek`，投递成功才 `--ack`）。与 `listen.dm`（20 秒常驻轮询）二选一或同时开 |
-| `preferences.publishedAfter` | `'YYYY-MM-DD'` = 只看这天（含）之后发布的；`''` = 不限。管 `feed` 与 `candidates` 两条通路，拿不到日期的条目会被丢掉并报数 |
+| `preferences.publishedAfter` | `'YYYY-MM-DD'` = 只看这天（含）之后发布的；`''` = 不限。管 `feed` 与 `candidates` 两条**她自己发起**的通路，拿不到日期的条目会被丢掉并报数。**主人点名不算**：`feed --topic "<关键词>"` / `--any-date` 这一轮不套限制 |
 | `quota.daily` | 限额闸默认每天 2 条自主发言（读取处 `tools/commands/quota.mjs`，实际记录在 `~/.bili-ai/quota.json`） |
 
 ## 4. 哪些改动要重启

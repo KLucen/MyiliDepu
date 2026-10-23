@@ -1,6 +1,9 @@
 // 选题器：照"她自己的偏好"挑今天该看什么。**只读**，不产生任何对外动作。
 //
-// 用法: node feed.mjs [--n 6] [--per 2] [--pool 30]
+// 用法: node feed.mjs [--n 6] [--per 2] [--pool 30] [--topic "关键词"] [--any-date]
+//   · 不带参数 = 她自己醒来挑片，受 preferences.publishedAfter 约束；
+//   · --topic "…" = **主人点名**要看某个话题 / 类型 → 不受发布时间限制（2026-10-23 主人要求）；
+//   · --any-date  = 主人说"不限时间" → 同样跳过日期过滤。
 // 数据来源：$DSH_HOME/myilidepu/diary.md 的「爱看」一行（偏好关键词）+「看过的」表格（防重复）
 //          + commented-videos.md（已评论过的视频也排除）
 //
@@ -11,7 +14,7 @@ import path from 'node:path'
 import { config } from '../lib/config.mjs'
 import crypto from 'node:crypto'
 import { dshPath, dataPath } from '../lib/paths.mjs'
-import { describeFilter, parseDay, splitByDay } from '../lib/pubdate.mjs'
+import { describeFilter, scopeOfDate, splitByDay } from '../lib/pubdate.mjs'
 // 2026-10-23：反馈加权/降权抽进 lib（feed 是脚本没法单测 ✗），主人的私信反馈与点赞走同一份口径
 import { readFeedback, splitFeedback, tokenSets, learnTokens, boostOf, penaltyOf, describeFeedback } from '../lib/fbscore.mjs'
 // 2026-10-23：重点关注某个 UP（主人点名的黑鸦Heya）——"不关注也要看得见"的独立通路
@@ -26,6 +29,10 @@ for (let i = 0; i < argv.length; i += 1) {
 const N = Number(opt.n ?? 6)
 const PER = Number(opt.per ?? 2)
 const POOL = Number(opt.pool ?? 30)
+// 主人点名（2026-10-23 主人要求）：给了一个话题 / 类型，或明说"不限时间" → 跳过日期过滤
+const OWNER_TOPIC = String(opt.topic ?? '').trim()
+const ANY_DATE = String(opt['any-date'] ?? '') !== '' && opt['any-date'] !== false
+const OWNER_PICKED = Boolean(OWNER_TOPIC || ANY_DATE)
 
 const HOME = (process.env.USERPROFILE || process.env.HOME || '/')
 const diary = dataPath('diary.md')
@@ -76,6 +83,29 @@ for (const kw of prefs.slice(0, 6)) {
     } catch { /* 这个词没结果就跳过 */ }
     await new Promise((r) => setTimeout(r, 300))
   }
+}
+
+// ── 主人点名的主题 / 类型（2026-10-23 主人要求）───────────────────────────────
+//   主人说「去看看 XX 类型的视频」时，她不该被「只看 X 之后发布的」拦住 ——
+//   那条规矩是防止她自己乱翻时只翻到新片，不是用来否决主人的点名的 ✗
+//   所以：这一路的条目标 ownerPicked，日期过滤整个跳过（见下面的 scopeOfDate）。
+if (OWNER_TOPIC) {
+  let got = 0
+  for (const order of ['click', 'pubdate', 'dm']) {
+    try {
+      const j = await (await fetch(`https://api.bilibili.com/x/web-interface/wbi/search/type?${wbi({ search_type: 'video', keyword: OWNER_TOPIC, order, page: 1 })}`, { headers: H })).json()
+      for (const it of (j?.data?.result ?? []).slice(0, Math.max(12, POOL))) {
+        pool.push({
+          bv: it.bvid, t: String(it.title).replace(/<[^>]+>/g, ''), d: secs(it.duration),
+          dm: Number(it.danmaku ?? 0), play: Number(it.play ?? 0), up: it.author,
+          kw: `主人点名:${OWNER_TOPIC}`, pubdate: it.pubdate, ownerPicked: true,
+        })
+        got += 1
+      }
+    } catch { /* 这个排序没结果就跳过 */ }
+    await new Promise((r) => setTimeout(r, 300))
+  }
+  console.error(`[来源] 主人点名「${OWNER_TOPIC}」→ 搜到 ${got} 条（**不受发布时间限制**）`)
 }
 
 // ── #3 更多来源（2026-10-18 加，Kimi 评审指出：只搜关键词 = 只刷"搜索"，不是刷 B 站）
@@ -187,19 +217,20 @@ const usable = [...new Map(pool.map((x) => [x.bv, x])).values()]
 //   配置键 preferences.publishedAfter，'' = 不限（默认，行为与以前完全一致）。
 //   与学习侧的 candidates 共用 tools/lib/pubdate.mjs 的同一份判断 —— 两个入口一个口径 ✓
 //   拿不到发布日期的条目算「不确定」丢掉，但条数会念出来（不静默）✓
-let after = null
+//   ⚠️ 主人点名（--topic / --any-date）时**整条规矩让路**：scopeOfDate 会返回 skipped ✓
+let scope
 try {
-  after = parseDay(config().preferences?.publishedAfter)
+  scope = scopeOfDate(config().preferences?.publishedAfter, { ownerPicked: OWNER_PICKED })
 } catch (e) {
   console.error(`配置里的 preferences.publishedAfter 写错了：${e?.message ?? e}`)
   console.error('（这行配置不生效 = 一条都不会被过滤，所以宁可当场停下 —— 请改成 2026-09-01 这种写法）')
   process.exit(2)
 }
-const dateStats = splitByDay(usable, after)
+const dateStats = splitByDay(usable, scope.limit)
 const uniq = dateStats.kept
 // 2026-10-23：命中"重点关注的人 × 他该汇报的主题"额外 +8 —— 主人点名的那个人、那些主题，
 //   应当排在一堆泛搜索结果前面；但 +8 压不过"偏好命中 ×4"，所以话题本身仍然要她爱看 ✓
-const scoreOf = (x) => densityOf(x) * 3 + hitsOf(x.t).length * 4 + boostOf(x.t, learnedTokens) - penaltyOf(x.t, dislikedTokens) + (x.topics?.length ? 8 : 0)
+const scoreOf = (x) => densityOf(x) * 3 + hitsOf(x.t).length * 4 + boostOf(x.t, learnedTokens) - penaltyOf(x.t, dislikedTokens) + (x.topics?.length ? 8 : 0) + (x.ownerPicked ? 6 : 0)
 uniq.sort((a, b) => scoreOf(b) - scoreOf(a))
 for (const x of uniq) { x._hits = hitsOf(x.t); x._score = scoreOf(x) }
 
@@ -220,9 +251,11 @@ console.log(`已看过/已评论过（已排除）: ${seen.size} 个 BV`)
 console.log(`候选池: ${pool.length} 条 → 去重去已看后 ${usable.length} 条`)
 const filterLine = describeFilter(dateStats)
 if (filterLine) console.log(filterLine)
-if (after && !uniq.length) {
-  console.log(`⚠️ 「${after.day} 之后发布的」把这一轮全滤掉了 —— 这是日期过滤的结果，不是源坏了。`)
+if (scope.skipped) console.log(`ⓘ ${scope.reason}`)
+if (scope.limit && !uniq.length) {
+  console.log(`⚠️ 「${scope.limit.day} 之后发布的」把这一轮全滤掉了 —— 这是日期过滤的结果，不是源坏了。`)
   console.log(`   想放宽：把设置页「只看 X 之后发布的视频」留空或改早一点（配置键 preferences.publishedAfter）。`)
+  console.log(`   主人点名要看某个话题：node bili.mjs feed --topic "<关键词>"（不受发布时间限制）。`)
 }
 console.log('')
 console.log(`今天可以看这几条（每词最多 ${PER} 条，共 ${N} 条）：`)

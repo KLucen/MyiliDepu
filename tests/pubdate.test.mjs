@@ -14,6 +14,7 @@ import {
   splitByDay,
   describeDay,
   describeFilter,
+  scopeOfDate,
 } from '../tools/lib/pubdate.mjs'
 
 // 用本地时区构造时间戳：判断口径是"本地自然日"，测试也必须用本地时间 ✗ 不能用 UTC
@@ -111,4 +112,30 @@ test('describeDay / describeFilter：说的话里要带日期与条数（不静�
     describeFilter({ day: '2026-09-01', scanned: 20, droppedOld: 12, droppedUnknown: 3, kept: 5 }),
     /20 条里留下 5 条/,
   )
+})
+
+// 2026-10-23 主人补的要求（m04178）：「只看 9 月之后」只约束她自己挑什么看；
+// 主人点名要看某个话题时不受发布时间限制。这条边界很容易被"顺手统一"改错 —— 钉死它。
+test('scopeOfDate：她自己选题时套日期限制，主人点名时不套', () => {
+  const mine = scopeOfDate('2026-09-01', { ownerPicked: false })
+  assert.equal(mine.limit.day, '2026-09-01', '自己选题：限制生效')
+  assert.equal(mine.skipped, false)
+  assert.equal(mine.reason, '', '没跳过就不说话')
+
+  const his = scopeOfDate('2026-09-01', { ownerPicked: true })
+  assert.equal(his.limit, null, '主人点名：不设限制')
+  assert.equal(his.skipped, true, '要说出来"这一轮没套限制"')
+  assert.match(his.reason, /主人点名/, '理由要说人话，便于在输出里解释')
+  assert.match(his.reason, /不套|不受/, '要说明"不受发布时间限制"')
+})
+
+test('scopeOfDate：没配日期时她自己选题不受限；主人点名仍如实说"没套限制"', () => {
+  const mine = scopeOfDate('', { ownerPicked: false })
+  assert.equal(mine.limit, null)
+  assert.equal(mine.skipped, false, '本来就没限制，"跳过"就无从谈起')
+
+  const his = scopeOfDate('', { ownerPicked: true })
+  assert.equal(his.limit, null)
+  assert.equal(his.skipped, true, '主人点名这一事实本身就要说出来（哪怕配置里本来也没限制）')
+  assert.match(his.reason, /主人点名/)
 })

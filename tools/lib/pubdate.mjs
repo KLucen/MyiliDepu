@@ -149,3 +149,28 @@ export function describeFilter(stats) {
   if (stats.droppedUnknown) parts.push(`没有发布日期的丢掉 ${stats.droppedUnknown} 条`)
   return parts.join('，')
 }
+
+/**
+ * 「这一轮到底要不要受发布时间限制」——判断只许有一处，免得两个入口各写一半。
+ *
+ * 规矩（2026-10-23 主人要求）：
+ *   · **她自己醒来挑片**（`feed` 的偏好池、学习候选 `candidates`）→ 受 `preferences.publishedAfter` 约束；
+ *   · **主人点名**要看某个话题 / 类型（`feed --topic "…"`），或主人说「不限时间」（`--any-date`）→ 不受约束。
+ *
+ * 为什么必须分开：日期限制的用意是「别让她翻来覆去只翻到新片」，
+ * 它不是一道用来否决主人的闸门 —— 主人说「去看看 XX」，再拿日期把人拦住就荒唐了。
+ *
+ * @param {string|object|null} configured 配置里的 preferences.publishedAfter
+ * @param {{ownerPicked?:boolean}} [opts] ownerPicked=true → 主人点名：直接放行，**且不去校验配置写法**
+ * @returns {{limit:object|null, skipped:boolean, reason:string}}
+ */
+export function scopeOfDate(configured, { ownerPicked = false } = {}) {
+  if (ownerPicked) {
+    return {
+      limit: null,
+      skipped: true,
+      reason: '主人点名（--topic / --any-date）：这一轮不套「只看某天之后发布的」限制',
+    }
+  }
+  return { limit: parseDay(configured), skipped: false, reason: '' }
+}

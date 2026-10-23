@@ -58,7 +58,7 @@ await s3.listenTick()
 now+=61000
 fs.writeFileSync(process.env.TEST_FEEDS,JSON.stringify({reply:[],at:[{id:'request1',at_time:Math.floor(now/1000),user:{mid:'222',nickname:'Owner'},item:{source_content:'请总结这个视频',uri:'https://www.bilibili.com/video/BV1234567890'}}]}))
 const countBefore=messages.length
-await s3.listenTick();assert.equal(messages.length,countBefore+1);assert.match(messages.at(-1),/【主人请求总结】/)
+await s3.listenTick();assert.equal(messages.length,countBefore+1);assert.match(messages.at(-1),/【主人 @ 你了/);assert.match(messages.at(-1),/① 想学/)
 now+=61000;await s3.listenTick();assert.equal(messages.length,countBefore+1)
 const sameSecond = JSON.parse(fs.readFileSync(process.env.TEST_FEEDS))
 sameSecond.at.push({...sameSecond.at[0], id:'request2'})
