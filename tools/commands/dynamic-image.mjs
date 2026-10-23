@@ -1,6 +1,8 @@
 // Post ONE image dynamic. Does not delete anything — the caller decides.
 //
 //   node bili-dynamic-image.mjs --image <path> [--text "..."] --dry | --go
+//   node bili-dynamic-image.mjs --pic <名字>   [--text "..."] --dry | --go
+//      （--pic 从主人的图片库 `D:\MyDepu\pics` 里按名字取图 —— 2026-10-23 主人要求，m05172）
 //
 // dry: reads the image locally, prints type/size/dimensions and the exact
 //      requests that would be sent. Uploads nothing.
@@ -12,6 +14,7 @@ import crypto from 'node:crypto'
 // 2026-10-21 修（外部审计）：下面 --go 路径里调了 gate()，但从来没导入过 ✗
 //   一跑到那儿就是 ReferenceError（danmaku.mjs 早就踩过同一个坑，这次补齐三条）
 import { gate } from '../lib/quota-gate.mjs'
+import { resolvePic } from '../lib/pics.mjs'   // 2026-10-23：--pic <名字> → 图片库里的绝对路径 ✓
 
 const argv = process.argv.slice(2)
 const args = new Map()
@@ -19,14 +22,20 @@ for (let i = 0; i < argv.length; i += 1) {
   const a = argv[i]
   if (a.startsWith('--')) args.set(a.slice(2), argv[i + 1]?.startsWith('--') ? true : argv[++i] ?? true)
 }
-const imagePath = args.get('image')
+const picName = args.get('pic')       // 图片库里的名字（D:\MyDepu\pics）—— 与 --image 二选一
+let imagePath = args.get('image')
 const text = args.get('text') ?? ''
 const atMid = args.get('at')          // 要 @ 的用户 mid
 const atName = args.get('at-name')    // 显示名（拼进 raw_text）
 const isDry = args.has('dry')
 const isGo = args.has('go')
 
-if (!imagePath || typeof imagePath !== 'string') { console.error('需要 --image <路径>'); process.exit(2) }
+// 2026-10-23：`--pic <名字>` 把「库里的名字」解析成绝对路径（写错名字会当场列出可用的 ✓）
+if (picName && typeof picName === 'string') {
+  if (imagePath && typeof imagePath === 'string') { console.error('--pic 和 --image 只能给一个'); process.exit(2) }
+  try { imagePath = resolvePic(picName) } catch (e) { console.error('✗ ' + e.message); process.exit(2) }
+}
+if (!imagePath || typeof imagePath !== 'string') { console.error('需要 --image <路径> 或 --pic <名字>（用 `node bili.mjs pics` 看有哪些）'); process.exit(2) }
 if (isDry === isGo) { console.error('必须且只能给一个 --dry 或 --go'); process.exit(2) }
 if (!fs.existsSync(imagePath)) { console.error(`图片不存在: ${imagePath}`); process.exit(2) }
 

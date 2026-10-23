@@ -13,14 +13,15 @@
 //        --who 对方昵称示例 --message "…" [--src "他说的话"]
 //   node reply-draft.mjs list [--json]
 //   node reply-draft.mjs show <id>        （只读：看一条的完整内容）
-//   node reply-draft.mjs brief            （可直接贴给主人的整块文本：含全文 + 怎么批注）
+//   node reply-draft.mjs brief [--dm]     （整块文本；--dm = 直接发进主人私信）
 //   node reply-draft.mjs drop <id>
 //   node reply-draft.mjs take <id>        （插件审批时用：取出参数并从队列删掉）
 import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
-// 2026-10-23：推送改由宿主统一负责（lib/scheduler.js 的 announceDrafts）→
-//   这里不再自己 spawn notify，execFile / NODE_EXE / fileURLToPath 三个 import 一并去掉 ✓
+import { execFile, execFileSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
+import { NODE_EXE } from '../lib/nodebin.mjs'   // 2026-10-21：别用 process.execPath（Electron 里它是主程序 ✗）
 
 const HOME = process.env.USERPROFILE || process.env.HOME || '.'
 const FILE = path.join(HOME, '.bili-ai', 'pending-replies.json')
@@ -65,11 +66,23 @@ if (cmd === 'add') {
   save(db)
   console.log(`✓ 已进待审队列：${item.id} → ${item.who || '（对方）'} · ${text.length} 字`)
 
-  // 2026-10-23 主人第二次强调：「我是需要她不要告诉我 b3157e05 这个东西，
-  //   因为我看不到实际草稿是什么，我需要她能直接将草稿的内容发给我」
-  //   → 推送改由**宿主**统一负责（lib/scheduler.js 的 announceDrafts，进队后 1 分钟内把正文发出去），
-  //     这里不再重复推一条，免得主人一稿收两条 ✗
-  console.log('· 正文会由插件自动发给主人（约 1 分钟内）✓ 主人要全文时用 `reply-draft brief`')
+  // 2026-10-23 主人定：「我只需要她醒着的时候发给我她想回复什么内容，
+  //   而不是给我像草稿【b3157e05】这样的编号」
+  //   → 这一步（她自己敲的 add）就把**正文**发进主人私信：她醒来时发的、内容就是她想说的 ✓
+  //     best-effort：推送失败不影响入队（队列还在，`brief --dm` 能补发）
+  try {
+    const summary = [
+      `【等你审核】${item.who || '对方'} 那条，我想这么回：`,
+      item.src ? `他说：${item.src}` : '',
+      '',
+      text,
+      '',
+      '回我「发」我就发 ✓「不发」就撤 ✓ 也可以直接说怎么改 ✓',
+    ].filter((x) => x !== '').join('\n')
+    const notifier = path.join(path.dirname(fileURLToPath(import.meta.url)), 'notify.mjs')
+    execFile(NODE_EXE, [notifier, summary, '--title', '待审回复'],
+      { windowsHide: true, timeout: 60000 }, () => {})
+  } catch {}
   process.exit(0)
 }
 
@@ -119,7 +132,20 @@ if (cmd === 'brief') {
   }
   lines.push('')
   lines.push('回我的时候带上 id 就行（例如「b3157e05 发」「812edadc 第二句太软，改成…」）✓')
-  console.log(lines.join('\n'))
+  const text = lines.join('\n')
+  console.log(text)
+  // `--dm`：把这段**直接发进主人私信**（她"醒着时发内容"那条路；只打印不发的行为保持不变 ✓）
+  if (argv.includes('--dm')) {
+    if (!db.items.length) process.exit(0)
+    const notifier = path.join(path.dirname(fileURLToPath(import.meta.url)), 'notify.mjs')
+    try {
+      execFileSync(NODE_EXE, [notifier, text, '--title', '待审回复'], { windowsHide: true, timeout: 90000, encoding: 'utf8' })
+      console.log('\n· 已发进主人私信 ✓')
+    } catch (e) {
+      console.error('\n✗ 私信没发出去：' + String(e.stdout ?? e.message ?? '').slice(0, 300))
+      process.exit(3)
+    }
+  }
   process.exit(0)
 }
 

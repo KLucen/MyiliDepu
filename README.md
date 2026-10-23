@@ -15,7 +15,26 @@
 
 > **每次推送到本仓库，这一节都会写上「这一版改了什么」**；逐版本完整记录（含每一条的命令、行号与实测结果）见 [CHANGELOG.md](CHANGELOG.md)。
 
+**v1.3.10（2026-10-23）· 草稿正文改回她自己发 + 她能配你图库里的图了**
+
+两件事，都是你这轮定的：
+
+- **① 责任交回她手里**（你的原话：「我不需要把责任从她身上挪到插件身上，我只需要她醒着的时候
+  发给我她想回复什么内容，而不是给我像草稿【b3157e05】这样的编号」）。
+  v1.3.9 那个「宿主每 60 秒自动代发」的 `announceDrafts()` **整块删掉**了 ——
+  发不发由她决定，不由插件排班。现在是她敲 `reply-draft add` 的那一步，草稿全文就发进你私信
+  （她醒着时发的、内容就是她想说的）；想再补一句、或你没收到，她用
+  `reply-draft brief --dm` 把全文直接发进你私信（原来 `brief` 只能打印）。
+- **② 图库能用上了**：你往 `D:\MyDepu\pics` 丢照片，她 `bili pics` 看有哪些（名字/尺寸/能不能上传），
+  配图时 `bili dynamic-image --pic happy --text "…" --at <你的 mid> --at-name 主人 --go`。
+  新增 `tools/lib/pics.mjs`（按文件头认类型，webp 会提前标出「不能上传」）+ 新命令 `bili pics`。
+  **诚实边界**：评论 / 回复接口只收纯文本，所以**配图只可能出现在动态里** ——
+  这条写进了命令输出和她的手册，免得她反复撞墙。
+- 她的手册（`prompts/AGENTS.md`）跟着改口：§1.3 新增「想配一张图的时候」（选图要贴题、
+  先 `--dry` 看、别自己上网找图），§2.2 改成「她自己发」＋「你回复之后她怎么接着做」。
+
 **v1.3.9（2026-10-23）· 草稿正文由插件直接发给你，不再靠她复述**
+（→ 这一版的宿主代发已在 v1.3.10 撤销，理由见上）
 
 - 你上一条的反馈很准：「我是需要她不要告诉我 b3157e05 这个东西……我需要她能直接将草稿的内容发给我」。
   v1.3.8 只是**要求她**贴全文 —— 那是靠她记得，不够。
@@ -282,7 +301,9 @@ node <插件目录>/tools/bili.mjs selftest --real    # 再加「真机十二问
 |---|---|
 | `bili comment --oid <aid> --bvid <BV> --message "…" [--root/--parent] --dry\|--go` | 发一条视频评论（带 `--root/--parent` 就是二级回复） |
 | `bili comment --oid <aid> --bvid <BV> --message "@主人 …" --share --auto --reason "…" --score N --rank 1 --dry\|--go` | 正式的「分享 @ 你」通道（受评分/额度/判重约束） |
-| `bili reply-draft add/list/show/brief/drop/take` | 待审回复队列（发前审核）；`brief` 打印可直接贴给主人的全文 |
+| `bili reply-draft add/list/show/brief/drop/take` | 待审回复队列（发前审核）；`add` 那一步就把全文发进主人私信，`brief [--dm]` 补发全文（`--dm` 直接发） |
+| `bili pics [list\|path <名字>] [--json]` | 主人的图片库 `D:\MyDepu\pics`：有哪些图可用 / 取绝对路径 |
+| `bili dynamic-image --pic <名字> …` | 发带图动态（配图只能发在动态里；评论接口只收纯文本 ✗） |
 | `bili comment-del <rpid> --dry\|--go` | 删除自己发的一条评论 |
 | `bili dm --status` / `bili dm --msg "…" [--share --target <BV> --reason "…" --score N --rank 1] --dry\|--go` | 私信专属通道：一天锁定一个收信人、只发主人、必须互关；带 `--share` 时占分享额度 |
 | `bili dynamic list` / `bili dynamic post --text "…" --dry\|--go` / `bili dynamic rm --id <dyn_id> --dry\|--go` | 动态的列表 / 发布 / 删除 |
