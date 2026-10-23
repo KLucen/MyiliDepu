@@ -12,6 +12,10 @@ import { config } from '../lib/config.mjs'
 import crypto from 'node:crypto'
 import { dshPath, dataPath } from '../lib/paths.mjs'
 import { describeFilter, parseDay, splitByDay } from '../lib/pubdate.mjs'
+// 2026-10-23：反馈加权/降权抽进 lib（feed 是脚本没法单测 ✗），主人的私信反馈与点赞走同一份口径
+import { readFeedback, splitFeedback, tokenSets, learnTokens, boostOf, penaltyOf, describeFeedback } from '../lib/fbscore.mjs'
+// 2026-10-23：重点关注某个 UP（主人点名的黑鸦Heya）——"不关注也要看得见"的独立通路
+import { normalizeWatchUps, latestVideos, describeWatchUps } from '../lib/watchups.mjs'
 
 
 const argv = process.argv.slice(2)
@@ -115,60 +119,53 @@ try { if (SOURCE_HOT === 'rank' || SOURCE_HOT === 'all') await fetchRank() } cat
 try { if (SOURCE_HOT === 'following' || SOURCE_HOT === 'all') await fetchFollowing() } catch (e) { console.error(`（关注源取不到，跳过：${String(e.message).slice(0, 60)}）`) }
 console.error(`[来源] ${SOURCE_HOT === 'all' ? '搜索 + 热门 + 排行 + 关注' : SOURCE_HOT === 'popular' ? '热门' : SOURCE_HOT === 'rank' ? '排行' : SOURCE_HOT === 'following' ? '关注' : '搜索'}`)
 
-// ── 反馈回流（2026-10-20 加，主人定：B 也做）────────────────────────────
-//   feedback.json 里 kind='like' 的事件带 videoTitle → 对被赞视频【标题相似】的候选加权
-//   相似度用字符二元组 Jaccard（中文不用分词也能用 ✓）
+// ── #4 重点关注的 UP（2026-10-23 主人要求：「我想让她关注黑鸦Heya的投稿视频」）──────
+//   为什么不靠上面那个"关注源"：它只回**已关注**的人，而"点关注"是改主人账号状态的
+//   动作（prompts/AGENTS.md 第 3 节：不自动关注 ✗）—— 所以这里按 mid 直拉他的投稿：
+//   公开接口、不需要关注关系、不产生任何对外动作 ✓
+//   汇报重点也写在配置里（watchups[].topics）：主人要的是「他的稿子里主要汇报
+//   DeepSeek / 国产大模型 / codex」，不是"他发的每条都值得 at 我"✗ → 命中主题的加权 ✓
+const WATCH_UPS = normalizeWatchUps(config().watchups)
+if (WATCH_UPS.length) {
+  let got = 0
+  for (const up of WATCH_UPS) {
+    const items = await latestVideos(up, { count: 8 })
+    for (const it of items) { it.watchUp = true; pool.push(it) }
+    got += items.length
+  }
+  console.error(`[来源] ${describeWatchUps(WATCH_UPS)} → 拉到投稿 ${got} 条`)
+}
+
+// ── 反馈回流（2026-10-20 加 · 2026-10-23 扩成"喜欢 / 不喜欢"两向）─────────────
+//   两个来源写同一本 feedback.json：
+//     · 主人赞了她的评论 → `quota react` 写 kind:'like'（2026-10-20 就有）
+//     · 主人私信说感不感兴趣 → 她当场 `bili feedback like|dislike --note "…"` 记一笔 ✓
+//   为什么必须两向：只有加权时，"别再发显卡降价了"这句话落不进任何代码，下一轮照样推 ✗
 const FEEDBACK = path.join(HOME, '.bili-ai', 'feedback.json')
-let likedEvents = []
-try {
-  const fb = JSON.parse(fs.readFileSync(FEEDBACK, 'utf8'))
-  likedEvents = (fb.events ?? [])
-    .filter((e) => e && (e.kind === 'like' || (typeof e.note === 'string' && /BV[0-9A-Za-z]{10}/.test(e.note))))
-    .filter((e) => String(e.videoTitle ?? '').trim())   // 没有标题的旧事件学不到东西，跳过 ✓
-} catch { /* 没有反馈就零加权 */ }
+const fbRaw = readFeedback(FEEDBACK)
+const fbSplit = splitFeedback(fbRaw)
+const likedEvents = fbSplit.liked.filter((e) => String(e.videoTitle ?? '').trim())   // 没标题的旧事件学不到东西，跳过 ✓
+const dislikedEvents = fbSplit.disliked
 const favBVs = new Set()
 try {
   const fj = JSON.parse(fs.readFileSync(path.join(HOME, '.bili-ai', 'favorites.json'), 'utf8'))
   for (const x of (fj.items ?? [])) if (x?.bv) favBVs.add(x.bv)
 } catch {}
-const likedBVs = new Set()
-try {
-  const fb = JSON.parse(fs.readFileSync(FEEDBACK, 'utf8'))
-  for (const e of (fb.events ?? [])) if (e?.bv) likedBVs.add(e.bv)
-} catch {}
-  // 抽主题词：拉丁词（≥2）+ 中文 3-4 字 n-gram（更具体，避免"我为/添加"这类噪音）
-  // 为什么不比标题相似度（Jaccard）：实测"几乎改一个字"的两条标题相似度只有 0.036 ✗
-  //   主题词方案能学到"dsh""大肥鱼"这种真正跨标题复用的信号 ✓
-  const STOP_WORDS = new Set(['我为', '添加', '开屏', '广告', '这个', '那个', '什么', '自己', '可以', '就是', '一个'])
+const likedBVs = fbSplit.likedBVs
+// 2026-10-23：主人点名「不喜欢」的那条视频直接拉黑 —— 同一个视频不该推第二遍 ✗
+const dislikedBVs = fbSplit.dislikedBVs
+  // 抽主题词 / 加权 / 降权全在 tools/lib/fbscore.mjs（纯函数，能单测 ✓）
+  //   ⚠️ 原来 learnTokens 写在这里，ownerName 直接塞进 new RegExp → 昵称带 . ( ) 就会炸 ✗（lib 里已转义）
   const ownerName = String(config().owner?.name ?? '')
-  const learnTokens = (text) => {
-    const out = new Set()
-    // ⚠️ ownerName 为空时 new RegExp('') 会在每个字之间插空格 → 必须先判断 ✗（实测踩过）
-    const base = ownerName ? String(text).replace(new RegExp(ownerName, 'g'), ' ') : String(text)
-    const t = base.replace(/@\S+/g, ' ')
-    for (const m of t.matchAll(/[A-Za-z][A-Za-z0-9]{1,}/g)) if (m[0].length >= 2) out.add(m[0].toLowerCase())
-    for (const m of t.matchAll(/[\u4e00-\u9fa5]{2,}/g)) {
-      const run = m[0]
-      for (const n of [3, 4]) for (let i = 0; i + n <= run.length; i += 1) {
-        const g = run.slice(i, i + n)
-        if (!STOP_WORDS.has(g)) out.add(g)
-      }
-    }
-    return [...out]
-  }
   // 她自己收藏过的（favorites.json）也算"品味信号" ✓ 和"被赞过的"并列
   let favItems = []
   try {
     const fj = JSON.parse(fs.readFileSync(path.join(HOME, '.bili-ai', 'favorites.json'), 'utf8'))
     favItems = (fj.items ?? []).filter((x) => x && x.bv)
   } catch {}
-  const learnedTokens = [...new Set([
-    ...likedEvents.flatMap((e) => learnTokens(String(e.videoTitle ?? '') + ' ' + String(e.comment ?? ''))),
-    ...favItems.flatMap((x) => learnTokens(String(x.title ?? '') + ' ' + String(x.reason ?? ''))),
-  ])]
-  const learnedHitsOf = (title) => learnedTokens.filter((tok) => title.toLowerCase().includes(tok)).length
-  // 每条命中 +2.5，最多 +7.5（不压过偏好命中的主权重 ✓）
-  const boostOf = (title) => Math.min(7.5, learnedHitsOf(title) * 2.5)
+  const favTokens = [...new Set(favItems.flatMap((x) => learnTokens(String(x.title ?? '') + ' ' + String(x.reason ?? ''), ownerName)))]
+  const { likedTokens, dislikedTokens } = tokenSets(fbRaw, ownerName)
+  const learnedTokens = [...new Set([...likedTokens, ...favTokens])]
 
 // ── 偏好命中与排序（2026-10-20 重写，主人定：不要对高播放量有偏向 ✗）────────────
 //   旧：弹幕密度 + log10(播放)×3  → 大 UP 的爆款永远霸榜 ✗
@@ -183,7 +180,7 @@ const densityOf = (x) => Math.log10(1 + x.dm / Math.max(30, x.d))
 // 2026-10-20：排除她自己的视频（实测刷到过自己的《大肥鱼成精了》✗ 别让自己看自己）
 const selfName = String(config().self?.name ?? "")
 const usable = [...new Map(pool.map((x) => [x.bv, x])).values()]
-  .filter((x) => !seen.has(x.bv) && !likedBVs.has(x.bv) && !favBVs.has(x.bv))
+  .filter((x) => !seen.has(x.bv) && !likedBVs.has(x.bv) && !favBVs.has(x.bv) && !dislikedBVs.has(x.bv))
   .filter((x) => !(selfName && String(x.up ?? "").includes(selfName)))
 
 // ── 「只看 X 之后发布的视频」（2026-10-23 主人要求）─────────────────────────
@@ -200,7 +197,9 @@ try {
 }
 const dateStats = splitByDay(usable, after)
 const uniq = dateStats.kept
-const scoreOf = (x) => densityOf(x) * 3 + hitsOf(x.t).length * 4 + boostOf(x.t)
+// 2026-10-23：命中"重点关注的人 × 他该汇报的主题"额外 +8 —— 主人点名的那个人、那些主题，
+//   应当排在一堆泛搜索结果前面；但 +8 压不过"偏好命中 ×4"，所以话题本身仍然要她爱看 ✓
+const scoreOf = (x) => densityOf(x) * 3 + hitsOf(x.t).length * 4 + boostOf(x.t, learnedTokens) - penaltyOf(x.t, dislikedTokens) + (x.topics?.length ? 8 : 0)
 uniq.sort((a, b) => scoreOf(b) - scoreOf(a))
 for (const x of uniq) { x._hits = hitsOf(x.t); x._score = scoreOf(x) }
 
@@ -216,7 +215,7 @@ for (const x of uniq) {
 }
 
 console.log(`偏好（来自日记）: ${prefs.join(' · ')}`)
-console.log(`反馈回流: 被赞 ${likedEvents.length} 条 · 她收藏 ${favItems.length} 条 → 学会 ${learnedTokens.length} 个主题词`)
+console.log(`反馈回流: ${describeFeedback({ liked: likedEvents, disliked: dislikedEvents, likedTokens, dislikedTokens, dislikedBVs })} · 她收藏 ${favItems.length} 条`)
 console.log(`已看过/已评论过（已排除）: ${seen.size} 个 BV`)
 console.log(`候选池: ${pool.length} 条 → 去重去已看后 ${usable.length} 条`)
 const filterLine = describeFilter(dateStats)
@@ -234,6 +233,12 @@ for (const x of diversified) {
   perKw[x.kw] = perKw[x.kw] ?? 0
   // 多样性已在上一步做过 → 这里不再二次限流 ✓
   perKw[x.kw] += 1; shown += 1
-  console.log(`  ${String(shown).padStart(2)}. ${x.bv}  ${String(x.d).padStart(4)}s  弹幕${String(x.dm).padStart(7)}  播放${String(x.play).padStart(9)}  ${x.t.slice(0, 40)}  @${x.up} ${x._hits.length ? "[" + x._hits.join("+") + "]" : ""}`)
+  // 2026-10-23：重点 UP 的稿子额外打一个 `[重点:DeepSeek·codex]` ——
+  //   主人一眼能看出"她要汇报的那几个主题"有没有真的命中 ✓（不然这条链路是隐形的）
+  const mark = [
+    x._hits.length ? `[${x._hits.join("+")}]` : "",
+    x.topics?.length ? `[重点:${x.topics.join("·")}]` : "",
+  ].filter(Boolean).join(" ")
+  console.log(`  ${String(shown).padStart(2)}. ${x.bv}  ${String(x.d).padStart(4)}s  弹幕${String(x.dm).padStart(7)}  播放${String(x.play).padStart(9)}  ${x.t.slice(0, 40)}  @${x.up} ${mark}`)
 }
 console.log('\n看完跑：node bili.mjs debrief <BV>   → 然后把"想法"写进日记的「想说」区（不发）')

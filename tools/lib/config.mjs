@@ -44,6 +44,13 @@ export const DEFAULTS = {
     //   拿不到发布日期的条目会被当成「不确定」丢掉，但会在输出里报出条数（不静默）✓
     publishedAfter: '',
   },
+  // 「重点关注某个 UP 的投稿」（2026-10-23 主人要求：「我想让她关注黑鸦Heya的投稿视频」）：
+  //   形如 [{ name: '黑鸦Heya', topics: ['DeepSeek', '国产大模型', 'codex'] }]。
+  //   · **不是**"去关注他"：B 站点关注是改主人账号状态的动作（AGENTS.md 第 3 节不许自动做 ✗），
+  //     这里按 mid 直拉他的公开投稿 → 不需要关注关系、不产生任何对外动作 ✓
+  //   · mid 可以不填（只给昵称）：feed 会按昵称查一次 mid（查不到就这一轮跳过，不猜）
+  //   · topics 是**汇报重点**：命中主题的稿子额外加权；她 at 主人时也照这几条讲 ✓
+  watchups: [],
   notify: { type: 'none', url: '', template: 'text', cmd: '' },   // none | desktop | webhook | command（见 commands/notify.mjs）
   aliases: [],                  // 历史昵称（兜底用；当前昵称仍从 nav 动态读）
   // 使用者本人（分享型评论要 @ 的人）：mid 用于白名单/查询，name 用于正文里的 @昵称
@@ -53,7 +60,10 @@ export const DEFAULTS = {
   // 「标尺」（2026-10-18 加）：分享前必须打分，不到 share.minScore 就是"今天没有值得发的"（合法结果）
   share: { enabled: true, via: 'comment', minScore: 13, silentAfterDays: 3 },  // 分享型（@主人）开关与评分阈值
   // 倾听（2026-10-18 补默认值，与设置页对齐）：评论区 + 直播间
-  listen: { comment: true, commentIntervalSec: 300, scope: 'both', oncePerPerson: false, allDay: false, dm: false, live: false, liveRoom: '', liveScope: 'owner' },
+  // 2026-10-23 主人要求：不要 20 秒轮询私信，改成「每次醒来先看一眼有没有私信」→ dmWake
+  //   dmWake=true：宿主在她醒来投递提示词之前先取一封主人的私信，塞进提示里（醒来第一件事就回 ✓）
+  //   dm=true 仍是老的常驻轮询（有人喜欢的话可以同时开；默认关，省额度也省打扰）
+  listen: { comment: true, commentIntervalSec: 300, scope: 'both', oncePerPerson: false, allDay: false, dm: false, dmWake: false, live: false, liveRoom: '', liveScope: 'owner' },
   // 作息：windows[] = 每天允许醒来的时段（每个窗口 = 一次机会）；maxWakesPerDay 缺省 = 窗口数（硬上限 3）
   night: { windows: [{ start: '20:00', end: '24:00', wakes: 1 }], skipChance: 0.3, minGapMin: 10, maxVideos: 5 },
 

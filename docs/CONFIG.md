@@ -198,6 +198,9 @@
 | `home` | 会话工作目录；留空 = `<数据目录>/work`，自定义时必须是已存在的绝对路径 |
 | `paths.dataDir` | **数据目录**（默认 `''` = `$DSH_HOME/myilidepu`）。填绝对路径即整体搬家：两本日记、见闻账本、阅读结果、抽帧、状态 JSON、会话工作区全跟着走。环境变量 `MYILIDEPU_DATA_DIR` 优先级更高。**改完要重启 DSH** |
 | `self.mid` / `self.name` | 她自己的 mid / 昵称（设置页只读展示，由登录态体检回填） |
+| `watchups` | **重点关注的 UP**：`[{ name, topics }]`（`name` 必填，`mid` 可省 → 按昵称查一次）。命中 `topics` 的稿子额外加权；她 at 主人时也照这几条讲。**不是"去关注他"**——按 mid 直拉公开投稿，不产生任何对外动作 |
+| `listen.dmWake` | `true` = 每次生物钟醒来**先看一封主人的私信**再去看片（只读 `--peek`，投递成功才 `--ack`）。与 `listen.dm`（20 秒常驻轮询）二选一或同时开 |
+| `preferences.publishedAfter` | `'YYYY-MM-DD'` = 只看这天（含）之后发布的；`''` = 不限。管 `feed` 与 `candidates` 两条通路，拿不到日期的条目会被丢掉并报数 |
 | `quota.daily` | 限额闸默认每天 2 条自主发言（读取处 `tools/commands/quota.mjs`，实际记录在 `~/.bili-ai/quota.json`） |
 
 ## 4. 哪些改动要重启

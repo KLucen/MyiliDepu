@@ -166,6 +166,7 @@ node <插件目录>/tools/bili.mjs selftest --real    # 再加「真机十二问
 | `bili feed [--n 6] [--per 2]` | 选题器：照日记里的口味捞候选，排除看过的 |
 | `bili debrief <BV> [--bucket 30] [--top 5] [--grid 3x3] [--no-frames]` | 一条龙看懂：封面 + 简介 + 官方字幕 + 弹幕热区 + 热评 + 抽帧 |
 | `bili frames <BV> [--n 9] [--grid 3x3] [--at 12,45,90] [--json]` | 看一眼画面（**轻**：直链 seek，不下载整片）→ 一张九宫格 SHEET 交给 `read_image` |
+| `bili feedback list\|like\|dislike --note "…" [--bv BV] [--title "…"]` | 反馈账：主人私信里说"感不感兴趣" → 她记一笔，下一轮 `feed` 按它加权/降权/拉黑 |
 | `bili read <BV> --frames 4` | 读原文的同时顺出一张 SHEET（抽帧失败不影响读原文） |
 | `bili watch-video <BV> [3x3\|4x4] [--uniform]` | 真「看」画面：取直链、下载、ffmpeg 抽帧拼九宫格 |
 | `bili subtitles <BV> [--lan ai-zh] [--print N]` | 拉官方字幕全文（带时间戳） |
@@ -235,7 +236,7 @@ node <插件目录>/tools/bili.mjs selftest --real    # 再加「真机十二问
 
 ## 八、已知限制 / 没做的事
 
-- **自动化测试覆盖的是逻辑，不是真机**：仓库里 159 个用例全部跑在临时目录 + 虚构凭据 + 模拟网络下，验证的是逻辑自洽。真机这一段做成了**清单而不是 CI** —— 装完请自己跑一遍 `node tools/bili.mjs selftest --real`（真机十二问，全只读），步骤与判据见 [docs/SMOKE.md](docs/SMOKE.md)。B 站接口是非官方的，可能哪天就变（WBI 签名、412 等都遇到过）。
+- **自动化测试覆盖的是逻辑，不是真机**：仓库里 207 个用例全部跑在临时目录 + 虚构凭据 + 模拟网络下，验证的是逻辑自洽。真机这一段做成了**清单而不是 CI** —— 装完请自己跑一遍 `node tools/bili.mjs selftest --real`（真机十二问，全只读），步骤与判据见 [docs/SMOKE.md](docs/SMOKE.md)。B 站接口是非官方的，可能哪天就变（WBI 签名、412 等都遇到过）。
 - **写链路不在自动冒烟范围内**：评论 / 动态 / 私信真的发出去这件事无法无人值守验证，只能先 `--dry` 看预演、再人工确认（见 [docs/SMOKE.md](docs/SMOKE.md) §3）。
 - **抽帧看画面依赖 ffmpeg**：不装就少一路「看画面」，字幕 / 热评 / 弹幕仍在。**缺 ffmpeg 不算故障**，`deps` 会以 `!`（可选）而不是 `✗` 报，也不会让退出码变红。两条抽帧路线：`debrief` 是**重**的（整片下载 → 场景检测），`frames` / `read --frames` 是**轻**的（直链 seek，不下载整片，182s / 24.8 MB 的片子抽 3 帧约 1.9 s）。
 - **本地 ASR 与平台写执行器没有合并进来**：移植到本仓库的阅读引擎是**只读**的，只做「读原文 → 落账 → 人格札记 → 收件箱导出」。**抽帧已经补回来了**（ffmpeg 实现，见上条），但 humanism 原来那套 Python 抽帧（`scripts/*.py`）没有移植 —— 不值得为它引入 Python 依赖。
