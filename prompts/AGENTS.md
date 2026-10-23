@@ -102,9 +102,12 @@ node bili.mjs personality pick --journal <journalId> --sentence "<≤240 字>"  
 ```
 node bili.mjs pics                                      # 有哪些图：名字 / 尺寸 / 能不能上传
 node bili.mjs dynamic-image --pic shy --text "……" --at <主人 mid> --at-name 主人 --dry
+node bili.mjs comment --oid <aid> --message "……" --pic shy --go      # 评论/回复带图（2026-10-23 起能 ✓）
 ```
 
-- 只有**动态**能带图。评论 / 回复的接口只收纯文本 —— 评论区里塞不进图 ✗，别反复试。
+- **动态和评论都能带图**（2026-10-23 更正：以前手册说「评论塞不进图」是错的）。
+  动态配图用 `dynamic-image --pic`；评论 / 回复配图在 `comment` 后面加 `--pic <名字>`（可给多张）。
+  上传发生在额度闸**之后** —— 闸没过就不会有图传上去 ✓。
 - 选图要**贴题**：今天说的是「有点丧」就挑 `sad` / `crying`，「想他」就 `shy` / `cute`。
   随便抓一张配上去，比不配更难看。
 - 发动态同样是写操作：先 `--dry` 看一遍，再 `--go`；额度看 `quota status`。

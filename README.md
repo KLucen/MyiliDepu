@@ -15,6 +15,24 @@
 
 > **每次推送到本仓库，这一节都会写上「这一版改了什么」**；逐版本完整记录（含每一条的命令、行号与实测结果）见 [CHANGELOG.md](CHANGELOG.md)。
 
+**v1.3.11（2026-10-23）· 评论 / 回复也能带图了（上一版说「只能纯文本」是错的）**
+
+- **你指出来的**：v1.3.10 我在 README、命令输出和她的手册里都写了「评论 / 回复接口只收纯文本，
+  配图只可能出现在动态里」—— **这句是错的**。B 站评论确实能带图，我去查实了。
+- **接口真相**（两份独立实现互证：`seiuna/bilibili-api` 的 `CommentArea.add()` 与
+  `pa-jesusf/Ibili` 的 `interaction.rs`）：评论带图**和动态用同一个上传接口**
+  `POST /x/dynamic/feed/draw/upload_bfs`，拿到 `image_url/img_width/img_height/img_size` 之后，
+  在 `POST /x/v2/reply/add` 的表单里多带一个字段 `pictures` =
+  `[{"img_src":…,"img_width":…,"img_height":…,"img_size":…}]`。
+- **所以现在**：`node bili.mjs comment --oid <aid> --message "……" --pic shy --go`
+  （`--pic` 可给多次，名字走你的图库 `D:\MyDepu\pics`，也收绝对路径）。
+  上传发生在**额度闸之后** —— 闸没过，一张图都不会传上去 ✓。
+- 修正的地方：`tools/lib/pics.mjs` 顶部注释、`bili pics` 的输出提示、
+  `tools/bili.mjs` 的命令说明、**她的手册** `prompts/AGENTS.md` §1.3（她最容易照旧的那句
+  「评论里塞不进图 ✗」已经删掉，防止她照着一份错的手册反复撞墙）。
+- 新增可复用的 `uploadPic()` / `replyPicture()`（`tools/lib/pics.mjs`），
+  动态与评论共用一个上传实现，不再各写一遍。
+
 **v1.3.10（2026-10-23）· 草稿正文改回她自己发 + 她能配你图库里的图了**
 
 两件事，都是你这轮定的：
@@ -28,8 +46,9 @@
 - **② 图库能用上了**：你往 `D:\MyDepu\pics` 丢照片，她 `bili pics` 看有哪些（名字/尺寸/能不能上传），
   配图时 `bili dynamic-image --pic happy --text "…" --at <你的 mid> --at-name 主人 --go`。
   新增 `tools/lib/pics.mjs`（按文件头认类型，webp 会提前标出「不能上传」）+ 新命令 `bili pics`。
-  **诚实边界**：评论 / 回复接口只收纯文本，所以**配图只可能出现在动态里** ——
-  这条写进了命令输出和她的手册，免得她反复撞墙。
+  ~~**诚实边界**：评论 / 回复接口只收纯文本，所以**配图只可能出现在动态里**~~
+  → **这条写错了**：评论也能带图，v1.3.11 已实现（见上）。当时它被写进命令输出和她的手册，
+  反而会让她在评论区反复撞墙 —— 教训是「接口能力别靠推断，要去查实」。
 - 她的手册（`prompts/AGENTS.md`）跟着改口：§1.3 新增「想配一张图的时候」（选图要贴题、
   先 `--dry` 看、别自己上网找图），§2.2 改成「她自己发」＋「你回复之后她怎么接着做」。
 
@@ -299,11 +318,12 @@ node <插件目录>/tools/bili.mjs selftest --real    # 再加「真机十二问
 
 | 命令 | 做什么 |
 |---|---|
-| `bili comment --oid <aid> --bvid <BV> --message "…" [--root/--parent] --dry\|--go` | 发一条视频评论（带 `--root/--parent` 就是二级回复） |
+| `bili comment --oid <aid> --bvid <BV> --message "…" [--root/--parent] [--pic <名字>] --dry\|--go` | 发一条视频评论（`--pic` 可给多次 = 带图；带 `--root/--parent` 就是二级回复） |
 | `bili comment --oid <aid> --bvid <BV> --message "@主人 …" --share --auto --reason "…" --score N --rank 1 --dry\|--go` | 正式的「分享 @ 你」通道（受评分/额度/判重约束） |
 | `bili reply-draft add/list/show/brief/drop/take` | 待审回复队列（发前审核）；`add` 那一步就把全文发进主人私信，`brief [--dm]` 补发全文（`--dm` 直接发） |
 | `bili pics [list\|path <名字>] [--json]` | 主人的图片库 `D:\MyDepu\pics`：有哪些图可用 / 取绝对路径 |
-| `bili dynamic-image --pic <名字> …` | 发带图动态（配图只能发在动态里；评论接口只收纯文本 ✗） |
+| `bili dynamic-image --pic <名字> …` | 发带图动态 |
+| `bili comment … --pic <名字>` | 发带图评论 / 带图回复（2026-10-23 起；与动态共用上传接口） |
 | `bili comment-del <rpid> --dry\|--go` | 删除自己发的一条评论 |
 | `bili dm --status` / `bili dm --msg "…" [--share --target <BV> --reason "…" --score N --rank 1] --dry\|--go` | 私信专属通道：一天锁定一个收信人、只发主人、必须互关；带 `--share` 时占分享额度 |
 | `bili dynamic list` / `bili dynamic post --text "…" --dry\|--go` / `bili dynamic rm --id <dyn_id> --dry\|--go` | 动态的列表 / 发布 / 删除 |

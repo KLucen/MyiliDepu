@@ -6,7 +6,8 @@
 //
 // 2026-10-23 主人要求（m05172）：「我希望她在 at 我的时候如果能够用上这些图片，可以选张图片发出来」
 //   · 发图走动态：`node bili.mjs dynamic-image --pic <名字> --text "…" --at <主人uid> --at-name 主人 --go`
-//   · 评论/回复接口只收纯文本 → **评论里塞不进图**，别硬试 ✗（这条诚实写在这里，避免她反复撞墙）
+//   · **评论 / 回复也能带图**（2026-10-23 更正）：`node bili.mjs comment … --pic <名字>`
+//     —— 之前这里写「评论塞不进图 ✗」是**错的**，别再照那句做 ✗
 import { listPics, resolvePic, describePics, picsDir, UPLOAD_KINDS } from '../lib/pics.mjs'
 
 const argv = process.argv.slice(2)
@@ -20,8 +21,8 @@ if (cmd === 'list' || cmd === '') {
   console.log('')
   if (items.length) {
     const usable = items.filter((x) => x.uploadable).map((x) => x.name)
-    console.log(`发图（只能发在**动态**里）：node bili.mjs dynamic-image --pic ${usable[0] ?? '<名字>'} --text "…" --at <主人uid> --at-name 主人 --go`)
-    console.log('评论 / 回复接口只收纯文本 —— 评论里配不了图 ✗')
+    console.log(`发图 · 动态：node bili.mjs dynamic-image --pic ${usable[0] ?? '<名字>'} --text "…" --at <主人uid> --at-name 主人 --go`)
+    console.log(`发图 · 评论/回复：node bili.mjs comment --oid <aid> --message "…" --pic ${usable[0] ?? '<名字>'} --go`)
   } else {
     console.log(`把图片放进 ${picsDir()} 就行（png / jpg / gif / webp 都认，只是 webp 上传前要转成 ${UPLOAD_KINDS.join('/')}）`)
   }

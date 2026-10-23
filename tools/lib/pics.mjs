@@ -4,9 +4,14 @@
 //   我希望她在 at 我的时候如果能够用上这些图片，可以选张图片发出来。」
 //
 // 设计边界（诚实）：
-//   · **动态**能带图（`x/dynamic/feed/draw/upload_bfs` + pics）→ 这条路通 ✓
-//   · **评论/回复**接口只收纯文本（`comment.mjs` 的 params 只有 {type,oid,message,plat,csrf}）→ 塞不进图 ✗
-//   · 这里只做「按名字找到文件 + 认类型 + 读尺寸」，上传与发帖仍归 `dynamic-image.mjs`（不重复实现 ✗）
+//   · **动态**能带图：`x/dynamic/feed/draw/upload_bfs` → `create/dyn` 的 `pics[]` ✓
+//   · **评论/回复**也能带图（2026-10-23 更正 ✓）：**同一个上传接口**，
+//     然后在 `/x/v2/reply/add` 的表单里多带一个 `pictures` 字段
+//     （JSON 数组，每项 {img_src,img_width,img_height,img_size}）✓
+//     —— 依据是两份独立实现：`seiuna/bilibili-api` 的 `CommentArea.add()` 与
+//        `pa-jesusf/Ibili` 的 `interaction.rs`（都是 upload_bfs → reply/add + pictures）。
+//        上一版这里写「评论只能纯文本 ✗」是**错的**，2026-10-23 主人指出来才查实。
+//   · 这里只做「按名字找到文件 + 认类型 + 读尺寸 + 上传」，发帖仍归各命令（不重复实现 ✗）
 import fs from 'node:fs'
 import path from 'node:path'
 import { dataPath } from './paths.mjs'
@@ -126,4 +131,55 @@ export function describePics(list, dir = picsDir()) {
     lines.push(`  ${x.name.padEnd(pad)}  ${x.kind.padEnd(4)} ${dim.padEnd(11)} ${kb}${x.uploadable ? '' : '  ⚠️ 不能上传（B 站只收 png/jpg/gif，转一下）'}`)
   }
   return lines
+}
+
+// ── 上传（2026-10-23：动态与评论**共用**这一个）───────────────────────────────
+// 注意：**上传本身就是写操作** —— 调用方必须先过限额闸，再调这里（见 dynamic-image.mjs 的注释）
+export const UPLOAD_BFS = 'https://api.bilibili.com/x/dynamic/feed/draw/upload_bfs'
+export const MIME_OF = { png: 'image/png', jpg: 'image/jpeg', gif: 'image/gif' }
+
+/**
+ * 把一张图传到 B 站，返回接口原样的四个字段（+ 本地信息便于打印）。
+ * 失败一律 throw（附上接口原话），不静默返回半成品 ✗
+ */
+export async function uploadPic(file, { cred, cookie, ua, referer = 'https://www.bilibili.com/', fetchImpl = fetch } = {}) {
+  let buf = null
+  try { buf = fs.readFileSync(file) } catch (e) { throw new Error(`读不了这张图：${e.message}`) }
+  const kind = kindOf(buf)
+  if (!kind) throw new Error(`「${path.basename(file)}」不是图片（认不出文件头）`)
+  if (!UPLOAD_KINDS.includes(kind)) throw new Error(`B 站不收 ${kind}（只收 png/jpg/gif）—— 换一张，或先转格式`)
+  const dims = dimsOf(buf, kind)
+  const fd = new FormData()
+  fd.append('file_up', new Blob([buf], { type: MIME_OF[kind] }), `upload.${kind}`)
+  fd.append('category', 'daily')
+  fd.append('csrf', String(cred?.bili_jct ?? ''))
+  const res = await fetchImpl(UPLOAD_BFS, {
+    method: 'POST',
+    headers: { 'user-agent': ua, referer, cookie },
+    body: fd,
+  })
+  let json = null
+  try { json = await res.json() } catch { throw new Error(`上传接口返回的不是 JSON（HTTP ${res.status}）`) }
+  if (json.code !== 0) {
+    throw new Error(`上传失败 code=${json.code} ${json.message ?? ''} ${JSON.stringify(json).slice(0, 200)}`)
+  }
+  const d = json.data ?? {}
+  if (!d.image_url) throw new Error(`上传成功但没拿到 image_url：${JSON.stringify(d).slice(0, 200)}`)
+  return {
+    img_src: d.image_url,
+    img_width: d.image_width ?? dims?.width ?? null,
+    img_height: d.image_height ?? dims?.height ?? null,
+    img_size: d.img_size ?? null,
+    kind, file, bytes: buf.length,
+  }
+}
+
+/** 评论接口只认这四个字段（多余的别塞，免得被风控盯上 ✗） */
+export function replyPicture(up) {
+  return {
+    img_src: up.img_src,
+    img_width: up.img_width,
+    img_height: up.img_height,
+    img_size: up.img_size,
+  }
 }

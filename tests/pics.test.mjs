@@ -6,7 +6,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { kindOf, dimsOf, listPics, resolvePic, describePics, IMAGE_EXT } from '../tools/lib/pics.mjs'
+import { kindOf, dimsOf, listPics, resolvePic, describePics, IMAGE_EXT, uploadPic, replyPicture, UPLOAD_BFS } from '../tools/lib/pics.mjs'
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'pics-test-'))
 
@@ -129,4 +129,79 @@ test('describePics：空库与有图两种输出', () => {
 
 test('IMAGE_EXT 覆盖四种扩展名（含 .jpeg）', () => {
   for (const e of ['.png', '.jpg', '.jpeg', '.gif', '.webp']) assert.ok(IMAGE_EXT.includes(e), e)
+})
+
+// ── 2026-10-23（v1.3.11）：评论也能带图 —— 上传与 pictures 形状 ────────────────
+// 依据两份独立实现（seiuna/bilibili-api 的 CommentArea.add()、pa-jesusf/Ibili 的 interaction.rs）：
+//   上传走 x/dynamic/feed/draw/upload_bfs，reply/add 多一个表单字段 pictures（四字段）
+
+/** 假 fetch：记下这次调用，返回预设响应 */
+function fakeFetch(reply) {
+  const calls = []
+  const fn = async (url, init) => {
+    calls.push({ url, init })
+    return { status: 200, json: async () => reply }
+  }
+  fn.calls = calls
+  return fn
+}
+
+test('uploadPic：成功时返回四个字段，并且真的 POST 到 upload_bfs（multipart + csrf）', async () => {
+  const dir = tmp()
+  const file = path.join(dir, 'shy.jpg')
+  fs.writeFileSync(file, fakeJpg(800, 600))
+  const fetchImpl = fakeFetch({ code: 0, data: { image_url: 'https://i0.hdslb.com/bfs/new_dyn/x.jpg', image_width: 800, image_height: 600, img_size: 42 } })
+  const up = await uploadPic(file, { cred: { bili_jct: 'JCT' }, cookie: 'SESSDATA=***', ua: 'UA', fetchImpl })
+  assert.equal(up.img_src, 'https://i0.hdslb.com/bfs/new_dyn/x.jpg')
+  assert.equal(up.img_width, 800)
+  assert.equal(up.img_height, 600)
+  assert.equal(up.img_size, 42)
+  assert.equal(up.kind, 'jpg')
+  assert.equal(fetchImpl.calls.length, 1)
+  assert.equal(fetchImpl.calls[0].url, UPLOAD_BFS)
+  assert.equal(fetchImpl.calls[0].init.method, 'POST')
+  const fd = fetchImpl.calls[0].init.body
+  assert.ok(fd instanceof FormData, 'body 必须是 multipart FormData')
+  assert.equal(fd.get('category'), 'daily')
+  assert.equal(fd.get('csrf'), 'JCT')
+  assert.ok(fd.get('file_up'), 'file_up 必须在')
+})
+
+test('uploadPic：接口 code≠0 → throw，并把接口原话带出来（不静默返回半成品）', async () => {
+  const dir = tmp()
+  const file = path.join(dir, 'x.png')
+  fs.writeFileSync(file, fakePng(10, 10))
+  const fetchImpl = fakeFetch({ code: -400, message: '图片格式不支持' })
+  await assert.rejects(() => uploadPic(file, { cred: { bili_jct: 'J' }, fetchImpl }), (e) => {
+    assert.match(e.message, /上传失败/)
+    assert.match(e.message, /-400/)
+    assert.match(e.message, /图片格式不支持/)
+    return true
+  })
+})
+
+test('uploadPic：不是图片 / 是 webp → 当场拒绝（webp B 站不收）', async () => {
+  const dir = tmp()
+  const notImg = path.join(dir, 'note.jpg')
+  fs.writeFileSync(notImg, '我只是一段话')
+  await assert.rejects(() => uploadPic(notImg, { fetchImpl: fakeFetch({ code: 0, data: {} }) }), /不是图片/)
+
+  const webp = path.join(dir, 'w.webp')
+  fs.writeFileSync(webp, fakeWebp(10, 10))
+  await assert.rejects(() => uploadPic(webp, { fetchImpl: fakeFetch({ code: 0, data: {} }) }), /不收 webp/)
+
+  await assert.rejects(() => uploadPic(path.join(dir, '没有这个文件.png'), { fetchImpl: fakeFetch({}) }), /读不了这张图/)
+})
+
+test('uploadPic：接口说成功但没给 image_url → 也算失败（免得发出一条没图的评论）', async () => {
+  const dir = tmp()
+  const file = path.join(dir, 'y.gif')
+  fs.writeFileSync(file, fakeGif(100, 100))
+  await assert.rejects(() => uploadPic(file, { fetchImpl: fakeFetch({ code: 0, data: { image_width: 1 } }) }), /没拿到 image_url/)
+})
+
+test('replyPicture：只留评论接口认的四个字段（多余字段不塞进去）', () => {
+  const pic = replyPicture({ img_src: 'u', img_width: 800, img_height: 600, img_size: 42, kind: 'jpg', file: 'C:\\x.jpg', bytes: 1234 })
+  assert.deepEqual(pic, { img_src: 'u', img_width: 800, img_height: 600, img_size: 42 })
+  assert.deepEqual(Object.keys(pic).sort(), ['img_height', 'img_size', 'img_src', 'img_width'])
 })

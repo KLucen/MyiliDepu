@@ -17,6 +17,9 @@ import { fileURLToPath } from 'node:url'
 import { config } from '../lib/config.mjs'
 import { validateShare } from '../lib/share-policy.mjs'
 import { NODE_EXE } from '../lib/nodebin.mjs'   // 2026-10-21：别用 process.execPath（Electron 里它是主程序 ✗）
+// 2026-10-23：评论**能带图**（上一版以为不能，是错的 —— 主人指出后查实）。
+//   `--pic <名字>`（可给多次）→ 先过闸，再上传，再发；上传本身是写操作，顺序不能反 ✗
+import { resolvePic, uploadPic, replyPicture } from '../lib/pics.mjs'
 
 // ── 限额闸（B 档「限额自主」的代码强制部分，2026-10-14 主人选 B 档）────────────────
 // 语义：闸门**只管自主发言**（带 --auto，即"她自己决定说的"）；主人当场授权的发言不拦 ✓
@@ -88,6 +91,19 @@ const type = String(args.get('type') ?? '1')
 const refererArg = args.get('referer') ? String(args.get('referer')) : ''
 const dry = args.get('dry') === true || args.has('dry')
 const go = args.get('go') === true || args.has('go')
+
+// 2026-10-23：--pic <名字>（可给多次）→ 评论带图。名字走图片库 `D:\MyDepu\pics`（也收绝对路径）。
+const PIC_REFS = []
+for (let i = 2; i < process.argv.length; i += 1) {
+  if (process.argv[i] !== '--pic') continue
+  const v = process.argv[i + 1]
+  if (!v || v.startsWith('--')) {
+    console.error('--pic 后面要跟图片名（用 `node bili.mjs pics` 看有哪些）')
+    process.exit(2)
+  }
+  PIC_REFS.push(v)
+}
+const PIC_FILES = PIC_REFS.map((r) => resolvePic(r))   // 名字写错会当场列出可用的 ✓
 
 // 2026-10-22：--check 只读预检 —— 回答「这条回复到底能不能发」✗ 不发文、不占额度
 //   动机：她撞过几次 fail-closed 之后就开始凭记忆说「又被拒了」✗
@@ -279,7 +295,13 @@ console.log('  content-type: application/x-www-form-urlencoded')
 console.log('  headers: UA(Chrome 131) + referer=' + referer)
 console.log('  cookie : SESSDATA=***; bili_jct=***; buvid3=***   (已脱敏)')
 console.log('  body   : ' + body.replace(encodeURIComponent(String(cred.bili_jct)), '***csrf***'))
-console.log(`  正文长度 ${message.length} 字符（上限 1000）；oid=${oid}；emoji/表情需转义符，本脚本只发纯文本`)
+console.log(`  正文长度 ${message.length} 字符（上限 1000）；oid=${oid}；emoji/表情需转义符，正文本身是纯文本`)
+if (PIC_FILES.length) {
+  console.log(`  配图 ${PIC_FILES.length} 张（先过闸 → 再上传 → 再发）：`)
+  for (const f of PIC_FILES) console.log(`    ${f}`)
+  console.log('  上传: POST https://api.bilibili.com/x/dynamic/feed/draw/upload_bfs （和动态用同一个）')
+  console.log('  然后在表单里多带 pictures=[{img_src,img_width,img_height,img_size}]')
+}
 
 // 闸门：自主发言（--auto）或分享型（--share）才拦；主人授权的发言只显示额度
 {
@@ -298,8 +320,27 @@ if (dry) {
 }
 
 // 判重（--once-per-person）已在入口处检查，这里直接发
+// 2026-10-23：配图要在**闸门之后**上传（上传是写操作），上传完再补进表单并**重新签名** ✓
+let postUrl = url
+let postBody = body
+if (PIC_FILES.length) {
+  console.log('\n[配图] 上传中…')
+  const ups = []
+  for (const f of PIC_FILES) {
+    const up = await uploadPic(f, { cred, cookie: cookieHeader, ua: UA, referer: 'https://www.bilibili.com/' })
+    console.log(`     ✓ ${path.basename(f)}  ${up.kind}  ${up.img_width}x${up.img_height}  ${up.img_size ?? '?'}KB  → ${up.img_src}`)
+    ups.push(up)
+  }
+  params.pictures = JSON.stringify(ups.map(replyPicture))
+  const reSigned = await wbiSign(params)
+  postBody = new URLSearchParams(params).toString()
+  postUrl = reSigned
+    ? `https://api.bilibili.com/x/v2/reply/add?w_rid=${reSigned.w_rid}&wts=${reSigned.wts}`
+    : 'https://api.bilibili.com/x/v2/reply/add'
+  console.log(`     表单已带 pictures（${params.pictures.length} 字节），签名已重算`)
+}
 console.log('\n[go] 发送中…')
-const res = await fetch(url, {
+const res = await fetch(postUrl, {
   method: 'POST',
   headers: {
     'user-agent': UA,
@@ -308,7 +349,7 @@ const res = await fetch(url, {
     'content-type': 'application/x-www-form-urlencoded',
     cookie: cookieHeader,
   },
-  body,
+  body: postBody,
 })
 const out = await res.json().catch(async () => ({ raw: await res.text() }))
 console.log(`  HTTP ${res.status}`)

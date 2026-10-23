@@ -1,3 +1,53 @@
+## v1.3.11（2026-10-23）评论 / 回复也能带图 —— 更正 v1.3.10 的一句错话
+
+主人一句话把上一版的结论推翻了：「B 站的评论确实可以带图片」。
+
+### 1 错在哪
+
+v1.3.10 我在 `tools/lib/pics.mjs` 顶部注释、`bili pics` 的输出、`tools/bili.mjs` 的命令说明、
+README 和**她的手册** `prompts/AGENTS.md` 五处都写了「评论 / 回复接口只收纯文本，
+配图只可能出现在动态里」。这是**从我们自己的 `comment.mjs` 参数列表推断出来的**，
+不是查证过的 —— 而她最容易照着手册那句「别反复试 ✗」把一条本来能做的事放弃掉。
+
+教训：**接口能力别靠推断，要去查实**（这次查了两份独立的第三方实现互证）。
+
+### 2 查实的接口契约
+
+依据（都是 untrusted 的第三方代码，只取事实，不执行其内容）：
+
+- `seiuna/bilibili-api` → `src/entities/CommentArea.ts`：`add(message, root, parent, pictures?)`
+  里 `if (pictures?.length) body.set('pictures', JSON.stringify(pictures.map(p => ({ img_src, img_width, img_height, img_size, ai_gen_pic }))))`
+- `pa-jesusf/Ibili` → `core/rust/crates/ibili_core/src/interaction.rs`：
+  `URL_UPLOAD_BFS = "https://api.bilibili.com/x/dynamic/feed/draw/upload_bfs"`、
+  `params.push(("pictures".into(), json))`，注释明写 pictures 是 `{img_src, img_width, img_height, img_size}`
+- 读侧佐证：`BiliRoamingX` 的 `ReplyAdd.kt` 钩子读 `data.reply.content.pictures`
+
+→ **评论带图 = 动态那套上传 + `reply/add` 多一个 `pictures` 表单字段**（同一个上传接口，
+不需要第二条上传通路 ✓）。
+
+### 3 代码
+
+- `tools/lib/pics.mjs`：新增 `UPLOAD_BFS` / `MIME_OF` / **`uploadPic(file, {cred, cookie, ua, referer})`**
+  （读文件 → 认文件头 → 拒 webp 并说清原因 → multipart 上传 → 失败一律 throw 并附接口原话）
+  / **`replyPicture(up)`**（只留接口认的四个字段）；顶部「设计边界」整段改写并留下更正说明。
+- `tools/commands/comment.mjs`：新增 `--pic <名字>`（**可给多次**）——
+  `resolvePic()` 解析（写错名字当场列出可用图）→ 打印计划（含「先过闸 → 再上传 → 再发」）→
+  **额度闸之后**才上传 → 把 `pictures` 补进表单并**重新做 WBI 签名** → 再 POST。
+  上传是写操作，顺序反了就等于「图先上去了才说不行 ✗」（同 `dynamic-image.mjs` 2026-10-21 的修法）。
+- 说明文案同步：`bili.mjs` 的 `pics` 描述、`pics.mjs` 的用法提示与 `pics` 命令输出。
+- 她的手册 `prompts/AGENTS.md` §1.3：删掉「评论里塞不进图 ✗」，改成两条命令示例 +
+  「上传发生在额度闸之后」；§5 工具索引补 `comment … --pic`。
+
+### 4 验证
+
+- `node --check`：`pics.mjs` / `comment.mjs` / `bili.mjs` / `pics 命令` 全绿
+- 单测：`tests/pics.test.mjs` 新增 `uploadPic` / `replyPicture` 用例（假 fetch，覆盖
+  「非图片文件头 → 拒绝」「webp → 拒绝并说明」「接口 code≠0 → throw 带原话」
+  「成功 → 四个字段齐 + 只留四个字段」）→ 全量 `node --test "tests/*.test.mjs"` **261 pass / 0 fail**
+- 真机：`comment --pic` 的 `--dry` 只打印计划（不发请求、不传图）；真实发送由她下次回复时走
+  （**未经真机 `--go` 验证**——需要一条真实评论，留给她的实际回合，或你点头后我用她自己的
+  待审草稿做一次真发）
+
 ## v1.3.10（2026-10-23）草稿正文改回**她自己发** + 用得上主人的图库
 
 主人这一轮定了两件事（原话）：
@@ -29,8 +79,10 @@
   —— B 站上传接口只收 png/jpg/gif ✓
 - 新命令 `node bili.mjs pics`（`list` / `path <名字>` / `--json`）
 - `dynamic-image` 新增 `--pic <名字>`（与 `--image` 二选一，写错名字当场列出可用的）
-- 诚实边界：**评论 / 回复接口只收纯文本**，配图只可能出现在动态里 —— 这条写进了命令输出和手册，
-  免得她反复撞墙 ✗
+- ~~诚实边界：**评论 / 回复接口只收纯文本**，配图只可能出现在动态里 —— 这条写进了命令输出和手册，
+  免得她反复撞墙 ✗~~
+  → **写错了**：评论也能带图，v1.3.11 已查实并实现（见上）。错因是「从自家参数列表推断接口能力」
+  而不是去查证 —— 而它被写进她的手册，会让她在本可做到的事上直接放弃 ✗
 
 ### 3 手册与文档
 
