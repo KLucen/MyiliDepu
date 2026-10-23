@@ -7,6 +7,7 @@
 // 用法:
 //   node candidates.mjs [--count N] [--json]
 import { config } from '../lib/config.mjs'
+import { describeFilter, parseDay } from '../lib/pubdate.mjs'
 import { closeService, runCommand } from '../../lib/reading/index.mjs'
 
 const argv = process.argv.slice(2)
@@ -38,6 +39,16 @@ if (requested === null)
 const clamped = requested > HARD_CAP
 const count = Math.min(requested, HARD_CAP)
 
+// 「只看 X 之后发布的视频」（preferences.publishedAfter，'' = 不限）：
+//   写法非法就在这里当场报错（fail-closed）—— 否则会被当成"设上了"，
+//   实际上一个都没过滤，属于静默失效 ✗
+let day = null
+try {
+  day = parseDay(config().preferences?.publishedAfter)
+} catch (e) {
+  fail(e?.code ?? 'INVALID_DAY', e?.message ?? String(e), 2)
+}
+
 const outcome = await runCommand((service) => service.candidates(count))
 closeService()
 if (!outcome.ok) fail(outcome.code, outcome.message)
@@ -49,6 +60,7 @@ const payload = {
   requested,
   clamped,
   count: rows.length,
+  publishedAfter: day ? day.day : null,
   candidates: rows,
   usage: outcome.value.usage,
 }
@@ -57,11 +69,18 @@ if (opt.json) {
   console.log(JSON.stringify(payload, null, 2))
   process.exit(0)
 }
+const filterLine = describeFilter(rows.filterStats)
+if (filterLine) console.log(`（${filterLine}）`)
 console.log(`候选（${rows.length} 条${clamped ? `，--count ${count} 超过硬上限 ${HARD_CAP} 已按上限取` : ''}）：`)
+if (!rows.length && day) {
+  console.log(`  热门这一页里没有 ${day.day} 之后发布的 —— 这是「日期过滤」的结果，不是接口坏了。`)
+  console.log(`  · 想放宽：设置页「只看 X 之后发布的视频」留空，或改成更早的日期`)
+  console.log(`  · 配置里的键是 preferences.publishedAfter（当前 ${day.day}）`)
+}
 for (const [i, r] of rows.entries()) {
   const mins = Math.floor((Number(r.duration) || 0) / 60)
   console.log(`  ${i + 1}. ${r.title}`)
-  console.log(`     ${r.author || '（未知 UP）'} · ${mins} 分钟 · ${r.url}`)
+  console.log(`     ${r.author || '（未知 UP）'} · ${mins} 分钟 · ${r.publishedDay ? `发布于 ${r.publishedDay}` : '发布日期未知'} · ${r.url}`)
   console.log(`     了解它的原文：node tools/bili.mjs read ${r.bvid}`)
 }
 console.log('\n（先挑一条真的想了解的；候选只是入口，不是任务清单。）')

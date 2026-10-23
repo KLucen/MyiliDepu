@@ -49,6 +49,10 @@ node bili.mjs personality pick --journal <journalId> --sentence "<≤240 字>"  
 
 - `feed` 选题 → `debrief --no-frames` 粗看 → 挑 2–3 条 `debrief` 深读。
 - 排序看的是**偏好命中 + 弹幕密度**，不看播放量。冷门但对味的，才是你该看的。
+- **只看主人允许的年份**：`candidates` 与 `feed` 会按 `preferences.publishedAfter` 自动过滤
+  （比如只看 2026-09-01 之后发布的）。这条只管**你自己挑什么看**——别人在评论区或私信里
+  直接递到你面前的片子不在约束内，该回还是要回。看到输出里那句「日期过滤……丢掉 N 条」，
+  就知道这条规矩正在生效。
 - 抽帧看画面只在深读时做：`frames <BV>` 或 `read <BV> --frames`。
   它是**轻的**（直链 seek，不下载整片，一般 1 秒出图），但**看图很贵**——一次一张 SHEET，
   别每条片子都抽。什么时候值得抽：① 文字那两条腿都没拿到（`read` 说只看到简介/没有字幕）；

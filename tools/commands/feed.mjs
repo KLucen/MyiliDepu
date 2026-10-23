@@ -11,6 +11,7 @@ import path from 'node:path'
 import { config } from '../lib/config.mjs'
 import crypto from 'node:crypto'
 import { dshPath, dataPath } from '../lib/paths.mjs'
+import { describeFilter, parseDay, splitByDay } from '../lib/pubdate.mjs'
 
 
 const argv = process.argv.slice(2)
@@ -65,6 +66,7 @@ for (const kw of prefs.slice(0, 6)) {
         pool.push({
           bv: it.bvid, t: String(it.title).replace(/<[^>]+>/g, ''), d: secs(it.duration),
           dm: Number(it.danmaku ?? 0), play: Number(it.play ?? 0), up: it.author, kw,
+          pubdate: it.pubdate,   // 2026-10-23：发布时间要带上，否则没法「只看 X 之后」✗
         })
       }
     } catch { /* 这个词没结果就跳过 */ }
@@ -80,14 +82,16 @@ async function fetchPopular() {
   const j = await (await fetch('https://api.bilibili.com/x/web-interface/popular?pn=1&ps=20', { headers: H })).json()
   for (const it of (j?.data?.list ?? [])) {
     pool.push({ bv: it.bvid, t: String(it.title ?? '').replace(/<[^>]+>/g, ''), d: Number(it.duration ?? 0),
-      dm: Number(it.stat?.danmaku ?? 0), play: Number(it.stat?.view ?? 0), up: it.owner?.name ?? '', kw: '热门' })
+      dm: Number(it.stat?.danmaku ?? 0), play: Number(it.stat?.view ?? 0), up: it.owner?.name ?? '', kw: '热门',
+      pubdate: it.pubdate })
   }
 }
 async function fetchRank() {
   const j = await (await fetch('https://api.bilibili.com/x/web-interface/ranking/v2?rid=0&type=all', { headers: H })).json()
   for (const it of (j?.data?.list ?? []).slice(0, 20)) {
     pool.push({ bv: it.bvid, t: String(it.title ?? '').replace(/<[^>]+>/g, ''), d: Number(it.duration ?? 0),
-      dm: Number(it.stat?.danmaku ?? 0), play: Number(it.stat?.view ?? 0), up: it.owner?.name ?? '', kw: '排行' })
+      dm: Number(it.stat?.danmaku ?? 0), play: Number(it.stat?.view ?? 0), up: it.owner?.name ?? '', kw: '排行',
+      pubdate: it.pubdate })
   }
 }
 // 关注的人发了什么（2026-10-18 加）：真人才会"刷关注"——只搜关键词等于只刷"搜索"，不像人
@@ -102,7 +106,8 @@ async function fetchFollowing() {
     const p = dt.split(':').map(Number)
     const secs = p.length === 2 ? p[0] * 60 + p[1] : p.length === 3 ? p[0] * 3600 + p[1] * 60 + p[2] : 0
     pool.push({ bv: ar.bvid, t: String(ar.title ?? '').replace(/<[^>]+>/g, ''), d: secs,
-      dm: 0, play: Number(ar.stat?.play ?? 0), up: a?.name ?? '', kw: '关注' })
+      dm: 0, play: Number(ar.stat?.play ?? 0), up: a?.name ?? '', kw: '关注',
+      pubdate: a?.pub_ts ?? ar.pubdate })   // 动态的发布时间在 module_author.pub_ts ✓
   }
 }
 try { if (SOURCE_HOT === 'popular' || SOURCE_HOT === 'all') await fetchPopular() } catch { console.error('（热门源取不到，跳过）') }
@@ -177,9 +182,24 @@ const hitsOf = (title) => prefTokens.filter((p) => p.tokens.some((tok) => title.
 const densityOf = (x) => Math.log10(1 + x.dm / Math.max(30, x.d))
 // 2026-10-20：排除她自己的视频（实测刷到过自己的《大肥鱼成精了》✗ 别让自己看自己）
 const selfName = String(config().self?.name ?? "")
-const uniq = [...new Map(pool.map((x) => [x.bv, x])).values()]
+const usable = [...new Map(pool.map((x) => [x.bv, x])).values()]
   .filter((x) => !seen.has(x.bv) && !likedBVs.has(x.bv) && !favBVs.has(x.bv))
   .filter((x) => !(selfName && String(x.up ?? "").includes(selfName)))
+
+// ── 「只看 X 之后发布的视频」（2026-10-23 主人要求）─────────────────────────
+//   配置键 preferences.publishedAfter，'' = 不限（默认，行为与以前完全一致）。
+//   与学习侧的 candidates 共用 tools/lib/pubdate.mjs 的同一份判断 —— 两个入口一个口径 ✓
+//   拿不到发布日期的条目算「不确定」丢掉，但条数会念出来（不静默）✓
+let after = null
+try {
+  after = parseDay(config().preferences?.publishedAfter)
+} catch (e) {
+  console.error(`配置里的 preferences.publishedAfter 写错了：${e?.message ?? e}`)
+  console.error('（这行配置不生效 = 一条都不会被过滤，所以宁可当场停下 —— 请改成 2026-09-01 这种写法）')
+  process.exit(2)
+}
+const dateStats = splitByDay(usable, after)
+const uniq = dateStats.kept
 const scoreOf = (x) => densityOf(x) * 3 + hitsOf(x.t).length * 4 + boostOf(x.t)
 uniq.sort((a, b) => scoreOf(b) - scoreOf(a))
 for (const x of uniq) { x._hits = hitsOf(x.t); x._score = scoreOf(x) }
@@ -198,7 +218,14 @@ for (const x of uniq) {
 console.log(`偏好（来自日记）: ${prefs.join(' · ')}`)
 console.log(`反馈回流: 被赞 ${likedEvents.length} 条 · 她收藏 ${favItems.length} 条 → 学会 ${learnedTokens.length} 个主题词`)
 console.log(`已看过/已评论过（已排除）: ${seen.size} 个 BV`)
-console.log(`候选池: ${pool.length} 条 → 去重去已看后 ${uniq.length} 条\n`)
+console.log(`候选池: ${pool.length} 条 → 去重去已看后 ${usable.length} 条`)
+const filterLine = describeFilter(dateStats)
+if (filterLine) console.log(filterLine)
+if (after && !uniq.length) {
+  console.log(`⚠️ 「${after.day} 之后发布的」把这一轮全滤掉了 —— 这是日期过滤的结果，不是源坏了。`)
+  console.log(`   想放宽：把设置页「只看 X 之后发布的视频」留空或改早一点（配置键 preferences.publishedAfter）。`)
+}
+console.log('')
 console.log(`今天可以看这几条（每词最多 ${PER} 条，共 ${N} 条）：`)
 const perKw = {}
 let shown = 0

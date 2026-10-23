@@ -38,6 +38,11 @@ export const DEFAULTS = {
   preferences: {
     like: ['AI 工具与插件', '鬼畜与怀旧向剪辑', '猫咪', 'Live2D/模型'],
     dislike: ['带货', '擦边', '标题党', '纯搬运'],
+    // 「只看某天之后发布的视频」（2026-10-23 主人要求）：
+    //   '' = 不限（默认，行为与以前完全一致）；填 'YYYY-MM-DD' = 只看这一天（含）之后发布的。
+    //   同时管两条通路：feed 的候选池 + 学习时的 candidates（同一个判断，见 tools/lib/pubdate.mjs）。
+    //   拿不到发布日期的条目会被当成「不确定」丢掉，但会在输出里报出条数（不静默）✓
+    publishedAfter: '',
   },
   notify: { type: 'none', url: '', template: 'text', cmd: '' },   // none | desktop | webhook | command（见 commands/notify.mjs）
   aliases: [],                  // 历史昵称（兜底用；当前昵称仍从 nav 动态读）
