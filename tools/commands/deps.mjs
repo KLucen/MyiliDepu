@@ -58,13 +58,16 @@ items.push({
   fix: '想要就装：① winget install ffmpeg  ② 或设环境变量 FFMPEG=路径  ③ 或放进 <仓库>/bin/ 或 <数据目录>/bin/；不装也能正常用',
 })
 
-// ③ Node 版本（要 18+ 才有稳定 fetch）
+// ③ Node 版本（2026-10-23 修：门槛从 18 提到 24）
+//   以前查的是 18+（fetch/Blob 够用），但账本用的是 `node:sqlite`（lib/reading/store.mjs:1 的
+//   DatabaseSync），18 上根本没有这个模块 → 体检报 ✓ 而一读账本就炸，属于"假绿" ✗
+//   package.json 的 engines 也写的是 node>=24，这里跟它对齐。
 const major = Number(process.versions.node.split('.')[0])
 items.push({
   name: 'Node.js',
-  ok: major >= 18,
+  ok: major >= 24,
   detail: `v${process.versions.node}`,
-  fix: '升级到 Node 18 或更高（fetch / Blob 之类要用）',
+  fix: '升级到 Node 24 或更高（账本用的 node:sqlite 需要 24+；fetch/Blob 也要它）；winget install OpenJS.NodeJS.LTS',
 })
 
 // ④ 两处目录分开查（2026-10-23 修）：以前只查 `~/.bili-ai` 还管它叫「数据目录」——
@@ -134,6 +137,29 @@ try {
     fix: '等它自己恢复（5→10→20→30 分钟退避）；期间只读缓存，别手动狂点',
   })
 } catch {}
+
+// 2026-10-23（P2）：开机自启也列出来 —— 生物钟只在 DSH 开着的时候走，
+//   所以「DSH 会不会自己起来」直接决定她晚上还醒不醒。没开不算故障（只是提醒），
+//   给 optional:true，免得把一个建议项报成 ✗ 把真问题淹掉。
+try {
+  const { status: autostartStatus, describe: describeAutostart } = await import('../lib/autostart.mjs')
+  const st = autostartStatus()
+  items.push({
+    name: '开机自启（可选：让生物钟有人守）',
+    ok: !!st.installed,
+    optional: true,
+    detail: describeAutostart(st),
+    fix: '想让它登录后自己起来：node bili.mjs autostart on（只写 HKCU，不需要管理员；撤销用 autostart off）',
+  })
+} catch (e) {
+  items.push({
+    name: '开机自启（可选：让生物钟有人守）',
+    ok: false,
+    optional: true,
+    detail: '查不了：' + String(e?.message ?? e).slice(0, 120),
+    fix: '手动看：node bili.mjs autostart status',
+  })
+}
 
 // 2026-10-23：可选依赖（ffmpeg）没装不算失败 —— 只有必需项缺了才算
 const bad = items.filter((i) => !i.ok && !i.optional)

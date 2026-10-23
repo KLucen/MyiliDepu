@@ -38,6 +38,7 @@ const map = {
   diary: ['commands/diary.mjs', '她的一天（可见性）：show 人读摘要 / log 记结构化事件 / tail 最近事件'],
   notify: ['commands/notify.mjs', '通知分发：把"自主发言后必须报备"落到代码里（后端 stdout/file/webhook/command，由 config.notify 决定）'],
   night: ['commands/whale-night.mjs', '生物钟：plan 掷骰子定今晚 / clock 到点退出叫醒她 / mark 兜底标记 / status 看计划'],
+  autostart: ['commands/autostart.mjs', '开机自启（P2）：登录 Windows 后自动启动 DSH，生物钟才有人守；status / on / off [--exe <路径>] —— 只写 HKCU，不需要管理员'],
   search: ['commands/search.mjs', '按关键词搜视频（WBI 签名）：标题/UP/播放/简介/标签'],
   covers: ['diagnostics/fetch-covers.mjs', '抓视频元信息 + 封面图存到 covers/（供看图理解内容）'],
   whois: ['diagnostics/whois.mjs', '按 mid 查昵称（@ 人前先核准名字）'],

@@ -214,6 +214,7 @@ node <插件目录>/tools/bili.mjs selftest --real    # 再加「真机十二问
 | `bili recon <BV>` | 发评论前的侦查：BV→aid + 评论区状态 + WBI 材料 |
 | `bili whois <mid>` | 按 mid 查昵称 |
 | `bili night plan/clock/mark/status` | 生物钟：掷骰子定今晚 / 到点退出叫醒 / 兜底标记 / 看计划 |
+| `bili autostart status/on/off` | 开机自启：登录 Windows 后自动启动 DSH（生物钟才有人守）。只写 `HKCU`，不需要管理员，`off` 即撤销 |
 | `bili diary show/log/tail` | 她的一天：人读摘要 / 记结构化事件 / 最近事件 |
 
 ## 六、隐私
@@ -238,7 +239,7 @@ node <插件目录>/tools/bili.mjs selftest --real    # 再加「真机十二问
 - **humanism 侧的抽帧、本地 ASR、平台写执行器没有合并进来**：移植到本仓库的阅读引擎是**只读**的，只做「读原文 → 落账 → 人格札记 → 收件箱导出」。
 - **评论端点不新增、不开放新的写入口**：只保留原有的分享通道；不提供任意转发、任意调度、共享凭据或自动外部安装/排程。
 - **没有多账号、代理/指纹轮换、自动解验证码**：这些都不会做。
-- **生物钟只在 DSH 开着、插件加载着的时候跑**：DSH 退了它就不活动；没有独立守护进程、没有云服务。
+- **生物钟只在 DSH 开着、插件加载着的时候跑**：DSH 退了它就不活动；没有独立守护进程、没有云服务。所以装了插件之后建议顺手开一次开机自启：`node tools/bili.mjs autostart on`（写 `HKCU\...\Run`，登录 Windows 后自动把 DSH 拉起来；`autostart off` 撤销，也可以去任务管理器 → 启动应用里禁用）。它**只解决「DSH 没开着」**——电脑关机或睡眠期间错过的那个窗口，它补不回来（那是生物钟 catch-up 的事，还没做）。目前只实现了 Windows，macOS / Linux 上 `status` 会直说没做。
 - **必须用真 node 运行时**：宿主主程序是 Electron 时不能用它跑命令，插件会自己找 node（找不到时 `deps` 会把它试过的候选和修法一起打出来，可用 `DSH_NODE` 指定）。拿 Electron 顶着**也能跑**，但每次调用都要启一个 Electron，更慢更吃内存 —— `deps` 会明说现在是哪种（`node` 还是 `electron`）。
 - **无界面（headless）DSH 不工作**：缺 `sessionController` / `webServer` / `connection` 时插件会一直 pending。**这是预期行为，不是装坏了**：DSH 会打印 `dsh-myilidepu: pending (waiting for services: sessionController, webServer, connection)`，`selftest` 结尾也会解释这一条。纯 CLI 命令（`node tools/bili.mjs …`）不受影响，那是独立的一条腿。
 - **没做的还有**：人格的模型权重训练（当前学习只落本地札记）、跨插件共享账号锁/配额/暂停、真实账号的公开演示。公开测试和示例永远是合成数据。

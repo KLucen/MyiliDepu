@@ -1,3 +1,56 @@
+## v1.3.0（2026-10-23）P2：开机自启 —— 让生物钟真的有人守
+
+「已知限制」里那条最要命的：**生物钟只在 DSH 开着的时候走**。DSH 没开，那一晚的窗口就整个
+错过，事后再开也不会补。这一版按用户选的那条路走 —— **保证登录后 DSH 自己在**，所以窗口有人守。
+
+```bash
+node tools/bili.mjs autostart status   # 看现状
+node tools/bili.mjs autostart on       # 开启：登录 Windows 后自动启动 DSH
+node tools/bili.mjs autostart off      # 撤销
+```
+
+### 做了什么
+
+- **新增 `tools/lib/autostart.mjs` + `tools/commands/autostart.mjs`**，接进 `bili.mjs` 命令表。
+- **只写 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` 下的一个值 `DeepSeekHarness`**：
+  只影响当前用户，**不需要管理员**，不写启动文件夹、不建计划任务、不碰 `HKLM` / 服务。
+  撤销用 `autostart off`，或在任务管理器 → 启动应用里禁用。
+- `on` 时会自己找 `DeepSeek Harness.exe`（`DSH_EXE` → `%LOCALAPPDATA%\Programs\…` → 三个
+  `Program Files` 变体），找不到就用 `--exe` 指定；路径不存在或含双引号时**直接拒绝，不写注册表**。
+- `status` 不只报「开没开」，还会把注册表里那条命令和**当前这个 exe** 比对：不一致（换盘、
+  升级、装了两份）时明说「指向的是另一个程序，建议重开一次」—— 否则会出现「明明开了却永远
+  不生效」这种最难查的状态。
+- `disable` 幂等：本来就没设置时返回「本来就是关的」，**不算失败**。
+- **`deps` 里多一条**（可选，不影响退出码）：开机自启现状 + 怎么开。
+
+### 顺手修掉的两个「假绿」
+
+- **`deps` 的 Node 门槛从 18 提到 24**（`tools/commands/deps.mjs`）：账本用的是 `node:sqlite`
+  （`lib/reading/store.mjs:1`），Node 18 上根本没这个模块 —— 以前 18/20 会报 `✓ Node.js`
+  然后一读账本就炸。现在和 `package.json` 的 `engines: node>=24` 对齐。
+- **`runReg` 显式给 `stdio`**：Node 的 `execFileSync` 默认把子进程 stderr 透到父进程，于是
+  「这一项还没设置」这种**正常情况**也会在终端打出 reg 的本地化报错（`错误: 系统找不到指定的
+  注册表项或值。`，还乱码），看着像故障。现在收进管道，真出错时错误对象上照样拿得到。
+
+### 诚实边界（写进代码注释、README 与 CLI 输出，不只写在 CHANGELOG）
+
+- 只在**登录 Windows 之后**触发；**电脑关机 / 睡眠期间错过的窗口补不回来** —— 那是 catch-up
+  那一半，这一版**没做**。
+- **只实现了 Windows**。macOS / Linux 上 `status` 会明说「没做」，`on` 直接抛 `UNSUPPORTED`，
+  不假装支持。
+- 它只负责「把 DSH 拉起来」。DSH 起来之后插件能不能跑，还取决于 profile、会话权限（见
+  [docs/SMOKE.md](docs/SMOKE.md)）。
+
+### 真机验证（本机 2026-10-23）
+
+- `node tools/bili.mjs autostart on` → `reg query HKCU\…\Run /v DeepSeekHarness` 读回
+  `"C:\Users\KLucen\AppData\Local\Programs\DeepSeek Harness\DeepSeek Harness.exe"`；
+  `Get-CimInstance Win32_StartupCommand` 里也能看到这条（Windows 自己认它）。
+- `deps` 从 `! 开机自启（可选）没开` 变成 `✓ 已开启：登录 Windows 后会自己启动 …`，整体仍 `✓ 全部可用`。
+- 新增 `tests/autostart.test.mjs` 12 例（走假 runner，不碰测试机的注册表）：真实 `reg query`
+  输出格式解析、值不存在时返回未安装、指向别的程序时 `matches=false`、`reg add` 参数逐项、
+  三种拒绝（路径不存在 / 带引号 / 非 Windows）**都不写注册表**、`disable` 幂等、四种措辞。
+
 ## v1.2.3（2026-10-23）P0/P1：装完能自证，环境不对会直说
 
 上一版之后剩下的「已知限制」里挑了两件最影响第一印象的：**单测绿但真机没验过**，以及
