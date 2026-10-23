@@ -15,6 +15,20 @@
 
 > **每次推送到本仓库，这一节都会写上「这一版改了什么」**；逐版本完整记录（含每一条的命令、行号与实测结果）见 [CHANGELOG.md](CHANGELOG.md)。
 
+**v1.3.7（2026-10-23）· 她不再躺在侧栏的「未分组」里**
+
+- **根因不是权限，是没人给她登记**：侧栏分组**不按 cwd 猜**，只看工作区记录里的
+  `sessionIds`（DSH 客户端 `owningGroupKey()` 就是 `workspaces.find(w => w.sessionIds.includes(id))`）。
+  她的会话是插件用 `sessionController.create({ sessionId, cwd })` 直接建的 —— 宿主从头到尾没登记过，
+  所以**即使你把 `D:\MyDepu\chat` 加成工作区，她照样在「未分组」里**。
+- **插件每次启动补登记一次**：找 path 与她会话 cwd 相同的那个工作区，调宿主的
+  `Workspace#attachSession()` 把她登记进去（宿主会校验 header.cwd 确实等于工作区 path 才放行）。
+  登记成功日志里会多一行：`已把她的会话登记进工作区「D:\MyDepu\chat」`。
+- **没登记工作区也不报错**：找不到相符的工作区就写一行提示让你去侧栏「添加工作区」，
+  不影响她醒不醒（服务用惰性 `ctx.get('workspaceRegistry')` 取，拿不到也不会让插件卡在 pending）。
+- 顺带修一个认知错误：v1.2.1 的去重与本节都跟**权限**无关 —— 她的会话一直是
+  `danger-full-access`（会话头三条事件可查），"看不见"从来只是分组问题。
+
 **v1.3.6（2026-10-23）· 人格札记不再限制每天条数**
 
 - **一天想记几条就记几条**：以前 `personality pick` 是一天只收一句（同一天第二次会报
@@ -349,3 +363,35 @@ node <插件目录>/tools/bili.mjs selftest --real    # 再加「真机十二问
 改完用 `node -e` 解一遍第一帧确认 `cwd` 已是新路径，再启动 DSH。
 
 数据本身不会丢：会话文件是 `session.v4.jsonl.zstd`，搬走的那份随时能搬回。
+
+### 「她在侧栏『未分组』里，不点开看不见」
+
+**先确认一件事：这跟权限无关。** 她的会话一直是完全访问，会话文件开头三条事件就是证据：
+
+```
+$ node -e "..."   # 或直接看 $DSH_HOME/sessions/--D-MyDepu-chat--/myilidepu/session.v4.jsonl.zstd
+{"type":"permission/preset","seq":0,...,"data":{"preset":"danger-full-access"}}
+{"type":"sandbox/mode","seq":1,...,"data":{"mode":"danger-full-access"}}
+{"type":"approval/policy","seq":2,...,"data":{"policy":"never"}}
+```
+
+**真正的原因**：侧栏分组**不按 cwd 猜**，只看工作区记录里的成员名单
+（DSH 客户端 `owningGroupKey()`：`workspaces.find(w => w.sessionIds.includes(sessionId))`）。
+正常路径是「在某个工作区里新建会话」时宿主顺手登记；而她的会话是插件用
+`sessionController.create({ sessionId, cwd })` 直接建的，宿主从没登记过 ——
+所以**把 `D:\MyDepu\chat` 加成工作区也没用**，她仍然在「未分组」里。
+
+**v1.3.7+ 已自动处理**：插件每次启动时找 path 与她会话 cwd 相同的那个工作区，
+调宿主的 `Workspace#attachSession()` 登记进去。需要**重启一次 DSH** 才生效（改的是 `lib/`）。
+登记成功时日志里会出现一行：`已把她的会话登记进工作区「D:\MyDepu\chat」`。
+
+手动救（不想等重启，或想立刻看到）：
+
+1. 先**完全退出 DSH**。
+2. 打开 `$DSH_HOME\storages\workspace.json`，找到 `path` 是 `D:\\MyDepu\\chat` 的那个工作区，
+   把 `"myilidepu"` 放进它的 `sessionIds` 数组**第一位**（宿主会自己校验 cwd 是否相符）。
+3. 启动 DSH —— 她会出现在 `chat` 这个分组下。顺手把她**置顶**，以后就不用再翻。
+
+> 侧栏的「水位线」只会默认露前 5 行，分组里会话多了要把她的行往上拖或置顶；
+> 折叠的分组不会点亮等待提示，所以别把 `chat` 这个分组折叠起来。
+

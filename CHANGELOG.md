@@ -1,3 +1,64 @@
+## v1.3.7（2026-10-23）她不再躺在侧栏的「未分组」里
+
+主人：「我添加了工作区但是那个会话还在未分组里」——顺着这句话把 DSH 侧栏的分组规则查穿了。
+
+### 1 先说结论：跟权限无关
+
+她的会话**一直**是完全访问，会话文件 `$DSH_HOME/sessions/--D-MyDepu-chat--/myilidepu/session.v4.jsonl.zstd`
+开头三条事件就是证据（`permission/preset=danger-full-access`、`sandbox/mode=danger-full-access`、
+`approval/policy=never`），源头是 `profiles/desktop/cordis.patch.yml` 的 `defaultPreset: danger-full-access`。
+"看不见"自始至终只是**分组**问题。
+
+### 2 根因：分组看成员名单，不看 cwd
+
+`@deepseek-ai/dsh-client-ui-workspace` 的 `owningGroupKey()`（`lib/client.js:863-864`）：
+
+```js
+function owningGroupKey(workspaces, sessionId) {
+  return workspaces.find((workspace) => workspace.sessionIds.includes(sessionId))?.workspaceId ?? "";
+}
+```
+
+落在 `""` 就是「未分组」。也就是说：**一个会话属于哪个工作区，只由工作区记录里的
+`sessionIds` 数组决定**，跟它的 cwd 一点关系都没有。列表里 `--D-MyDepu-chat--` 桶的四个会话
+都没有出现在任何工作区的 `sessionIds` 里 —— 这就是成因。
+
+正常登记发生在「在某个工作区里新建会话」时（宿主调 `Workspace#attachSession()`）。
+她的会话是插件用 `ctx.sessionController.create({ sessionId, cwd })` 直接建的，
+**绕过了登记那一步**，于是从 2026-10-22 第一次醒来起就没进过任何工作区。
+
+顺带确认：客户端**没有**把会话拖进别的分组的交互 —— `commitSessionDrag()`
+（`client.js:3107-3119`）只写"同一分组内的浏览器本地顺序"（`setSessionOrder(activeDrag.accountKey, ...)`），
+跨组拖拽根本不存在。所以只能靠宿主登记。
+
+### 3 修法：插件每次启动补登记一次
+
+`lib/session-home.js` 新增 `attachToWorkspace(ctx, { sessionId, workDir })`：
+
+- 惰性取服务：`ctx.get('workspaceRegistry')`（**不写进 `inject`** —— 拿不到只是少个显示便利，
+  绝不能让它把插件卡成 `pending (waiting for service: ...)`）。服务名从宿主源码确认：
+  `dsh-workspace` 里 `super(ctx, "workspaceRegistry")`。
+- 在工作区列表里找 `path` 与 `workDir` 规范化后相同的那个，调它的 `attachSession(sessionId)`。
+- 宿主校验很严（`dsh-workspace/lib/index.js:111-128`）：要读会话头的 `cwd`、`realpathNormalize`、
+  必须是已存在目录、且 `cwd === record.path`，否则抛
+  `cannot attach session '...': its cwd resolves to '...'`。我们只挑 path 相符的，
+  找不到就返回 `no-workspace` 让调用方提示你「去侧栏添加工作区」，**不猜、不乱挑**。
+
+`lib/scheduler.js` 的 `ensureSession()` 在 `guardSessionCopies('创建后')` 之后调用它，
+成功时日志多一行 `已把她的会话登记进工作区「D:\MyDepu\chat」`；全部失败都吞掉（登记不上只是显示问题）。
+
+### 4 测试
+
+`tests/session-home.test.mjs` 新增 6 例（该文件 12/12 通过）：相符即登记一次、
+Windows 路径大小写与斜杠写法不同也算相符、已是成员不重复登记、没有相符工作区时如实返回
+`no-workspace` 且不乱挑、拿不到服务返回 `no-registry` 不抛、宿主拒绝时错误向上抛由调用方吞。
+全量 `node --test "tests/*.test.mjs"` → **246 tests / 246 pass / 0 fail**（v1.3.6 是 240）。
+
+### 5 需要重启一次
+
+改的是 `lib/`，重启 DSH 后才会补登记。手动救法（不改代码、立刻生效）写在 README 第九节
+「她在侧栏『未分组』里，不点开看不见」。
+
 ## v1.3.6（2026-10-23）人格札记：取消「每天只收一句」
 
 主人：「修改人格札记的限制，可以不限制每天记录的条数」

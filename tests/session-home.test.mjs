@@ -14,7 +14,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import zlib from 'node:zlib'
-import { dedupeSessionCopies, scanSessionCopies, readSessionHeader, sessionsRoot } from '../lib/session-home.js'
+import { dedupeSessionCopies, scanSessionCopies, readSessionHeader, sessionsRoot, attachToWorkspace } from '../lib/session-home.js'
 
 const ID = 'myilidepu'
 
@@ -115,4 +115,72 @@ test('sessions 目录不存在时安静返回', () => {
   assert.equal(r.total, 0)
   assert.equal(r.kept, null)
   assert.equal(r.moved.length, 0)
+})
+
+// ── 登记进工作区（2026-10-23：主人加好了工作区，她还在「未分组」）──────────────
+// 侧栏分组只看 workspace.sessionIds；她的会话是插件建的，宿主从没登记过。
+function fakeCtx(workspaces) {
+  const rec = { list: () => workspaces }
+  return { get: (name) => (name === 'workspaceRegistry' ? rec : undefined) }
+}
+
+function fakeWorkspace({ path: wsPath, sessionIds = [], id = 'w-chat', onAttach } = {}) {
+  const calls = []
+  return {
+    id,
+    path: wsPath,
+    sessionIds,
+    calls,
+    async attachSession(sid) {
+      calls.push(sid)
+      if (onAttach) await onAttach(sid)
+      sessionIds.unshift(sid)
+    },
+  }
+}
+
+test('cwd 相符的工作区：会把她的会话登记进去', async () => {
+  const ws = fakeWorkspace({ path: 'D:\\MyDepu\\chat' })
+  const r = await attachToWorkspace(fakeCtx([ws]), { sessionId: ID, workDir: 'D:\\MyDepu\\chat' })
+  assert.deepEqual(r, { ok: true, already: false, workspaceId: 'w-chat', path: 'D:\\MyDepu\\chat' })
+  assert.deepEqual(ws.calls, [ID])
+})
+
+test('大小写与斜杠写法不同也算相符（Windows 路径）', async () => {
+  const ws = fakeWorkspace({ path: 'D:\\MyDepu\\chat' })
+  const r = await attachToWorkspace(fakeCtx([ws]), { sessionId: ID, workDir: 'd:/mydepu/chat/' })
+  assert.equal(r.ok, true)
+  assert.deepEqual(ws.calls, [ID])
+})
+
+test('已经是成员：不重复登记', async () => {
+  const ws = fakeWorkspace({ path: 'D:\\MyDepu\\chat', sessionIds: [ID] })
+  const r = await attachToWorkspace(fakeCtx([ws]), { sessionId: ID, workDir: 'D:\\MyDepu\\chat' })
+  assert.equal(r.ok, true)
+  assert.equal(r.already, true)
+  assert.deepEqual(ws.calls, [])
+})
+
+test('没有 path 相符的工作区：如实说 no-workspace，不乱挑一个', async () => {
+  const other = fakeWorkspace({ path: 'C:\\Users\\KLucen\\Desktop\\肥鱼嘟嘟可', id: 'w-fish' })
+  const r = await attachToWorkspace(fakeCtx([other]), { sessionId: ID, workDir: 'D:\\MyDepu\\chat' })
+  assert.equal(r.ok, false)
+  assert.equal(r.reason, 'no-workspace')
+  assert.deepEqual(other.calls, [])
+})
+
+test('拿不到 workspaceRegistry 服务：返回 no-registry，不抛', async () => {
+  const r = await attachToWorkspace({ get: () => undefined }, { sessionId: ID, workDir: 'D:\\MyDepu\\chat' })
+  assert.deepEqual(r, { ok: false, reason: 'no-registry' })
+})
+
+test('attachSession 被宿主拒绝（cwd 对不上）时向上抛，由调用方吞掉', async () => {
+  const ws = fakeWorkspace({
+    path: 'D:\\MyDepu\\chat',
+    onAttach: () => { throw new Error("cannot attach session 'myilidepu' to workspace 'D:\\MyDepu\\chat': its cwd resolves to 'D:\\MyDepu\\work'") },
+  })
+  await assert.rejects(
+    () => attachToWorkspace(fakeCtx([ws]), { sessionId: ID, workDir: 'D:\\MyDepu\\chat' }),
+    /its cwd resolves to/,
+  )
 })
