@@ -64,12 +64,18 @@ DSH → 设置里的「我的分身」。它背后的接口路径是 `/dsh-myili
 
 ```bash
 node <插件目录>/tools/bili.mjs selftest
+node <插件目录>/tools/bili.mjs selftest --real    # 再加「真机十二问」：真账号真接口走一遍只读链路
 ```
 
-看最后两行：
+`selftest` 不联网就能跑完；`--real` 会真的请求 B 站（只读，不发任何东西）。
+装完想确认「真的能用」而不是「配置看起来对」，跑带 `--real` 的那条 ——
+逐条判据和出问题怎么报都在 [docs/SMOKE.md](docs/SMOKE.md)。
 
-1. **找到它的会话**：左侧「工作区」→ 展开「未分组」文件夹 → 里面那个 `myilidepu` 会话（不点开也能看见它的名字）。
+看最后三行：
+
+1. **找到它的会话**：左侧「工作区」→ 展开「未分组」文件夹（数据目录换过地方的话，会在按数据目录命名的工作区里）→ 里面那个 `myilidepu` 会话。
 2. **给会话「完全访问」权限**：会话设置 → 权限 →「完全访问 / danger-full-access」。她需要自己跑 node 命令（读字幕、写日记、发评论），普通权限会被拦。
+3. **如果设置页打不开、插件一直 pending**：那多半是 headless 模式，看 `selftest` 输出的第 ③ 条解释 —— 那是预期行为，不是装坏了。
 
 **常见卡点**
 
@@ -198,8 +204,8 @@ node <插件目录>/tools/bili.mjs selftest
 
 | 命令 | 做什么 |
 |---|---|
-| `bili selftest` | 装完先跑：配置 / 凭据 / 登录态 / 目录 / ffmpeg + 下一步两件事 |
-| `bili deps [--json]` | 依赖体检：cookie / ffmpeg / Node / 数据目录 |
+| `bili selftest [--real]` | 装完先跑：配置 / 凭据 / 登录态 / 目录 / 三本本子 + 下一步三件事；加 `--real` 再跑「真机十二问」（真账号真接口，全部只读） |
+| `bili deps [--json]` | 依赖体检：cookie / 凭据目录 / **数据目录** / Node 运行时 / 限流，外加可选 ffmpeg |
 | `bili session` | 确认凭据属于哪个号 |
 | `bili thread <aid> <bvid> <rpid>` | 导出一条评论的完整楼中楼结构 |
 | `bili check-comment <rpid> <aid> [bvid]` | 复核评论是否存在 |
@@ -226,14 +232,15 @@ node <插件目录>/tools/bili.mjs selftest
 
 ## 八、已知限制 / 没做的事
 
-- **没有在你的真实账号和真实 DSH 环境里做过回归**：仓库里的测试全部是临时目录 + 虚构凭据 + 模拟网络，验证的是逻辑不是真机兼容。B 站接口是非官方的，可能哪天就变（WBI 签名、412 等都遇到过）。
-- **抽帧看画面依赖 ffmpeg**：不装就少一路「看画面」，字幕 / 热评 / 弹幕仍在。
+- **自动化测试覆盖的是逻辑，不是真机**：仓库里 134 个用例全部跑在临时目录 + 虚构凭据 + 模拟网络下，验证的是逻辑自洽。真机这一段做成了**清单而不是 CI** —— 装完请自己跑一遍 `node tools/bili.mjs selftest --real`（真机十二问，全只读），步骤与判据见 [docs/SMOKE.md](docs/SMOKE.md)。B 站接口是非官方的，可能哪天就变（WBI 签名、412 等都遇到过）。
+- **写链路不在自动冒烟范围内**：评论 / 动态 / 私信真的发出去这件事无法无人值守验证，只能先 `--dry` 看预演、再人工确认（见 [docs/SMOKE.md](docs/SMOKE.md) §3）。
+- **抽帧看画面依赖 ffmpeg**：不装就少一路「看画面」，字幕 / 热评 / 弹幕仍在。**缺 ffmpeg 不算故障**，`deps` 会以 `!`（可选）而不是 `✗` 报，也不会让退出码变红。
 - **humanism 侧的抽帧、本地 ASR、平台写执行器没有合并进来**：移植到本仓库的阅读引擎是**只读**的，只做「读原文 → 落账 → 人格札记 → 收件箱导出」。
 - **评论端点不新增、不开放新的写入口**：只保留原有的分享通道；不提供任意转发、任意调度、共享凭据或自动外部安装/排程。
 - **没有多账号、代理/指纹轮换、自动解验证码**：这些都不会做。
 - **生物钟只在 DSH 开着、插件加载着的时候跑**：DSH 退了它就不活动；没有独立守护进程、没有云服务。
-- **必须用真 node 运行时**：宿主主程序是 Electron 时不能用它跑命令，插件会自己找 node（找不到在 `deps` / 设置页报错，可用 `DSH_NODE` 指定）。
-- **无界面（headless）DSH 不工作**：缺 `sessionController` / `webServer` / `connection` 时插件会一直 pending。
+- **必须用真 node 运行时**：宿主主程序是 Electron 时不能用它跑命令，插件会自己找 node（找不到时 `deps` 会把它试过的候选和修法一起打出来，可用 `DSH_NODE` 指定）。拿 Electron 顶着**也能跑**，但每次调用都要启一个 Electron，更慢更吃内存 —— `deps` 会明说现在是哪种（`node` 还是 `electron`）。
+- **无界面（headless）DSH 不工作**：缺 `sessionController` / `webServer` / `connection` 时插件会一直 pending。**这是预期行为，不是装坏了**：DSH 会打印 `dsh-myilidepu: pending (waiting for services: sessionController, webServer, connection)`，`selftest` 结尾也会解释这一条。纯 CLI 命令（`node tools/bili.mjs …`）不受影响，那是独立的一条腿。
 - **没做的还有**：人格的模型权重训练（当前学习只落本地札记）、跨插件共享账号锁/配额/暂停、真实账号的公开演示。公开测试和示例永远是合成数据。
 
 ## 九、出事了怎么救

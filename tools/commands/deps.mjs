@@ -9,6 +9,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { ffmpegInfo } from '../lib/ffmpeg.mjs'
 import { apiState } from '../lib/bili-api.mjs'
+import { dataPath } from '../lib/paths.mjs'
 
 const HOME = process.env.USERPROFILE || process.env.HOME || '.'
 const cred = path.join(HOME, '.bili-ai', 'credentials.json')
@@ -40,13 +41,21 @@ items.push({
   fix: '在设置里重新填 SESSDATA / bili_jct（buvid3 可留空）；注意 cookie 会过期，写操作前先跑一次本命令',
 })
 
-// ② ffmpeg（抽帧看画面）
+// ② ffmpeg（抽帧看画面）—— 2026-10-23：这是**可选**依赖，不再是必选项 ✗ → !
+//   没有它照样能读字幕 / 官方总结 / 热评 / 弹幕，只是少一路「看画面」（抽帧）。
+//   以前把可选项按必选项报 ✗，于是"没装 ffmpeg"的机器体检永远「不通过 · 退出码 3」，
+//   把真正的红项（凭据失效、找不到真 node）淹在噪音里，agent 也会误判成装坏了 ✗
 const ff = ffmpegInfo()
 items.push({
-  name: 'ffmpeg（抽帧看画面）',
+  name: 'ffmpeg（可选：抽帧看画面）',
   ok: ff.ok,
-  detail: ff.ok ? `${ff.version}\n  路径：${ff.path}` : (ff.path ? `找到了但跑不起来：${ff.version ?? ff.error}` : '没找到'),
-  fix: '① winget install ffmpeg  ② 或设环境变量 FFMPEG=路径  ③ 或放进 <仓库>/bin/ 或 <数据目录>/bin/',
+  optional: true,
+  detail: ff.ok
+    ? `${ff.version}\n  路径：${ff.path}`
+    : (ff.path
+      ? `找到了但跑不起来：${ff.version ?? ff.error}`
+      : '没找到 —— 不影响字幕/官方总结/热评/弹幕，只少一路「看画面」'),
+  fix: '想要就装：① winget install ffmpeg  ② 或设环境变量 FFMPEG=路径  ③ 或放进 <仓库>/bin/ 或 <数据目录>/bin/；不装也能正常用',
 })
 
 // ③ Node 版本（要 18+ 才有稳定 fetch）
@@ -58,31 +67,60 @@ items.push({
   fix: '升级到 Node 18 或更高（fetch / Blob 之类要用）',
 })
 
-// ④ 可写的家目录（放 cookie/配额/日记）
-let dirOk = false
+// ④ 两处目录分开查（2026-10-23 修）：以前只查 `~/.bili-ai` 还管它叫「数据目录」——
+//   但数据目录早就跟着配置搬走了（默认 <DSH_HOME>/myilidepu，本机已改到 D:\MyDepu），
+//   于是一边报"C:\Users\…\.bili-ai 可写 ✓"、一边她的日记其实写在别处，体检结论是错的 ✗
+const probeDir = (d) => {
+  try {
+    fs.mkdirSync(d, { recursive: true })
+    const probe = path.join(d, '.write-probe')
+    fs.writeFileSync(probe, 'ok'); fs.unlinkSync(probe)
+    return true
+  } catch { return false }
+}
+const credDir = path.join(HOME, '.bili-ai')
+items.push({
+  name: '凭据目录可写',
+  ok: probeDir(credDir),
+  detail: credDir,
+  fix: '检查该目录权限（cookie 就放这儿）',
+})
+let DATA_DIR = ''
 try {
-  const d = path.join(HOME, '.bili-ai')
-  fs.mkdirSync(d, { recursive: true })
-  const probe = path.join(d, '.write-probe')
-  fs.writeFileSync(probe, 'ok'); fs.unlinkSync(probe)
-  dirOk = true
-} catch {}
+  DATA_DIR = dataPath()
+  items.push({
+    name: '数据目录可写',
+    ok: probeDir(DATA_DIR),
+    detail: DATA_DIR + '（她的日记 / 账本 / 人格札记 / 工作区都在这儿）',
+    fix: '检查该目录权限；想换地方：设置页「数据目录」或配置文件里的 paths.dataDir',
+  })
+} catch (e) {
+  items.push({ name: '数据目录可写', ok: false, detail: '解析不出数据目录：' + String(e?.message ?? e).slice(0, 120), fix: '配置文件里的 paths.dataDir 要写绝对路径' })
+}
 // 2026-10-21 加（Issue #8-3）：没有 node 运行时 → 生物钟/监听/直播间全部停用，
 //   但以前体检不报这一项 ✗ 表面全绿、其实永远不会醒 ✗
 try {
-  const { NODE_EXE, isRealNode } = await import('../lib/nodebin.mjs')
+  const { NODE_EXE, NODE_KIND, isRealNode } = await import('../lib/nodebin.mjs')
   const real = isRealNode()
   items.push({
-    name: 'node 运行时',
-    ok: real,
-    detail: real ? NODE_EXE : ('这个不是 node：' + NODE_EXE + '（会静默返回空输出）'),
-    fix: '设置环境变量 DSH_NODE 指向 node 可执行文件的绝对路径，然后重启 DSH',
+    name: real ? 'node 运行时' : 'node 运行时（可选：现在用桌面版主程序顶着）',
+    // 能解析出运行时 = 一定能跑：resolveRuntime 已经真的执行过一次并验了输出（probeRuntime）✗ 不会静默假绿
+    ok: true,
+    optional: !real,
+    detail: real
+      ? `${NODE_EXE}\n  版本：${process.versions.node}`
+      : `${NODE_EXE}\n  这是 DSH 桌面版的主程序（kind=${NODE_KIND}），靠 ELECTRON_RUN_AS_NODE=1 当 node 用 —— 能用，但每次调用都要启一个 Electron，更慢更吃内存`,
+    fix: '装一个真正的 Node.js（winget install OpenJS.NodeJS.LTS），或设环境变量 DSH_NODE 指向 node.exe 的绝对路径，然后完全退出并重启 DSH',
   })
 } catch (e) {
-  items.push({ name: 'node 运行时', ok: false, detail: '检查失败：' + String(e?.message ?? e).slice(0, 80), fix: '设置 DSH_NODE' })
+  items.push({
+    name: 'node 运行时',
+    ok: false,
+    detail: '解析失败：' + String(e?.message ?? e).slice(0, 200),
+    fix: '设 DSH_NODE=真 node 的绝对路径（Windows 常见 C:\\Program Files\\nodejs\\node.exe），然后完全退出并重启 DSH',
+  })
 }
 
-items.push({ name: '数据目录可写', ok: dirOk, detail: path.join(HOME, '.bili-ai'), fix: '检查该目录权限' })
 // 2026-10-22：把「接口缓存 / 熔断」现状也列出来 ——
 //   被 412 限流时最想知道的就是「还要等多久」和「缓存里还有多少能撑」
 try {
@@ -97,16 +135,21 @@ try {
   })
 } catch {}
 
-const bad = items.filter((i) => !i.ok)
+// 2026-10-23：可选依赖（ffmpeg）没装不算失败 —— 只有必需项缺了才算
+const bad = items.filter((i) => !i.ok && !i.optional)
+const optionalMissing = items.filter((i) => !i.ok && i.optional)
 
 if (asJson) {
   console.log(JSON.stringify({ ok: bad.length === 0, node: process.versions.node, items }, null, 2))
 } else {
   console.log('== 依赖体检 ==')
   for (const i of items) {
-    console.log(`${i.ok ? '✓' : '✗'} ${i.name}  ${i.detail ? '— ' + i.detail : ''}`)
-    if (!i.ok) console.log(`    修：${i.fix}`)
+    const mark = i.ok ? '✓' : (i.optional ? '!' : '✗')
+    console.log(`${mark} ${i.name}  ${i.detail ? '— ' + i.detail : ''}`)
+    if (!i.ok) console.log(`    ${i.optional ? '可选（不影响使用），想要就' : '修'}：${i.fix}`)
   }
-  console.log(bad.length ? `\n✗ ${bad.length} 项不可用 —— 先用上面的"修"处理，再重跑一次。` : '\n✓ 全部可用')
+  if (bad.length) console.log(`\n✗ ${bad.length} 项不可用 —— 先用上面的"修"处理，再重跑一次。`)
+  else if (optionalMissing.length) console.log(`\n✓ 必需项都在。${optionalMissing.length} 项可选没装（${optionalMissing.map((i) => i.name).join('、')}），不影响使用。`)
+  else console.log('\n✓ 全部可用')
 }
 process.exit(bad.length ? 3 : 0)

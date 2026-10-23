@@ -31,12 +31,20 @@ export function resolveRuntime(dshHome, options = {}) {
   if (platform === 'darwin') cands.push('/Applications/DeepSeek Harness.app/Contents/Resources/runtime/primary-runtime/dependencies/node/bin/node', '/opt/homebrew/bin/node', '/usr/local/bin/node', '/usr/bin/node')
   if (platform === 'win32' && env.ProgramFiles) cands.push(path.join(env.ProgramFiles, 'nodejs', bin))
   if (options.allowCurrent && !electron) cands.push(current)
+  const tried = []
   for (const file of new Set(cands.filter(Boolean))) {
-    try { if (fs.statSync(file).isFile() && probe(file, env)) return { file, env: { ...env } } } catch {}
+    tried.push(file)
+    try { if (fs.statSync(file).isFile() && probe(file, env)) return { file, env: { ...env }, kind: 'node' } } catch {}
   }
   if (electron) {
     const nodeEnv = { ...env, ELECTRON_RUN_AS_NODE: '1' }
-    if (probe(current, nodeEnv)) return { file: current, env: nodeEnv }
+    if (probe(current, nodeEnv)) return { file: current, env: nodeEnv, kind: 'electron' }
   }
-  throw Error('[myilidepu] 找不到可执行脚本的 node 运行时，请设置 DSH_NODE 为真实 node 的绝对路径')
+  // 2026-10-23（P1）：报错里带上「试过哪些地方」——
+  //   以前只说"找不到"，使用者不知道该往哪儿看；现在一眼能看出是 PATH 没配、还是 DSH_NODE 指错了。
+  throw Error(
+    '[myilidepu] 找不到可执行脚本的 node 运行时（已试 ' + tried.length + ' 个候选：'
+    + 'DSH_NODE / DSH_DESKTOP_NODE_EXECUTABLE / <dshHome>/dsh-runtimes/*/dependencies/node/bin / PATH / Program Files\\nodejs）。'
+    + '请把 DSH_NODE 设成真实 node 的绝对路径（Windows 常见 C:\\Program Files\\nodejs\\node.exe），然后完全退出并重启 DSH。'
+  )
 }
