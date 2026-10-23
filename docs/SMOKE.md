@@ -1,6 +1,6 @@
 # 真机冒烟清单（SMOKE）
 
-一句话：**单测全绿不等于能用。** 仓库里那 134 个用例跑在临时目录里，用的是假 cookie、模拟网络、假宿主——它证明的是**逻辑自洽**，不是**接口能通**。B 站接口是非官方的，WBI 签名、HTTP 412 风控、`-352 / -799 / -509` 这些码都真实遇到过，所以「测试全绿而真机第一条就红」完全可能。
+一句话：**单测全绿不等于能用。** 仓库里那 159 个用例跑在临时目录里，用的是假 cookie、模拟网络、假宿主——它证明的是**逻辑自洽**，不是**接口能通**。B 站接口是非官方的，WBI 签名、HTTP 412 风控、`-352 / -799 / -509` 这些码都真实遇到过，所以「测试全绿而真机第一条就红」完全可能。
 
 这份清单只做一件事：在**真实 B 站账号 + 真实 DSH** 上，按顺序确认她真的能读、能记、能写，并且**在你按下最后一个按钮之前不会对外发出任何东西**。
 
@@ -595,15 +595,37 @@ node tools/bili.mjs comment --oid <aid> --bvid <BV> --message "@析构万理的�
 
 ### Q9 抽帧素材（可选，依赖 ffmpeg）
 
-**证明**：真"看"视频那条腿（取直链 → 下载 → 抽帧 → 拼图）在本机可用。
+**证明**：真"看"视频这条腿在本机可用。**两条路线，先跑轻的那条。**
 
-先确认 ffmpeg：
+**Q9a 轻的（推荐先跑，不下载整片）**：
 
 ```powershell
-node tools/bili.mjs deps
+node tools/bili.mjs frames <BV> --n 4
 ```
 
-看 `ffmpeg（抽帧看画面）` 那一行。本机是 `C:\Users\KLucen\anaconda3\Library\bin\ffmpeg.exe`（8.1.2，从 PATH 找到）。
+**期望**（**以实际输出为准**）：
+
+```
+标题: <标题>   时长: <mm:ss>   画质: <画质名>
+抽帧: 2x2 共 4 帧，用时 <N>s（不下载整片：直链 seek）
+  ✓ 00:03  <KB> KB
+  …（每帧一行）
+
+SHEET: D:\MyDepu\shots\frames\<BV>-<时间戳>\sheet-2x2.jpg
+FRAMES: 00:03  D:\MyDepu\shots\frames\<…>\f00.jpg
+…（每帧一行）
+```
+
+判据：① `用时` 通常是 **1–3 秒**（百秒级片子），**不该**出现几十秒～几分钟的等待
+（那说明它在下载整片）；② `SHEET` 指向的 jpg 能打开，里面有 `--n` 张真实画面。
+
+同一条路也能挂在读原文上（`read` 的可选第三条腿，抽帧失败不影响读原文）：
+
+```powershell
+node tools/bili.mjs read <BV> --frames 4
+```
+
+**Q9b 重的（整片下载，深读那条腿）**：
 
 ```powershell
 node tools/bili.mjs watch-video <BV> 3x3
@@ -633,10 +655,15 @@ SUBS:  D:\MyDepu\shots\video\<…>.jpg
 |---|---|---|
 | `找不到 ffmpeg（抽帧/看画面需要它）。任选一种解决：① 装一个：winget install ffmpeg …② 用环境变量指定：set FFMPEG=…③ 把它放到 <仓库>\bin\ffmpeg.exe 或 <数据目录>\bin\ffmpeg.exe` | 2 | 没装 ffmpeg |
 | `view 失败 code=<code> <message>` | 3 | 拿不到视频元信息 |
-| `没拿到直链（code=<code> <message>）——有些视频要登录或只有 dash 流` | 4 | 这条视频取不到直链 |
-| `下载失败 HTTP <状态>` / `下载失败：响应没有 body` | 5 | 下载中断 |
+| `没拿到直链（code=<code> <message>）——有些视频要登录或只有 dash 流` | 3（`frames`）/ 4（`watch-video`） | 这条视频取不到直链 |
+| `下载失败 HTTP <状态>` / `下载失败：响应没有 body` | 5 | 下载中断（只有 `watch-video` 会） |
 | `ffmpeg 抽帧失败：<原因>` | 6 | ffmpeg 有但用不了 |
-| `格子格式应是 3x3 这样` | 2 | 第二个参数写成别的 |
+| `NO_FRAMES: 一帧都没抽到（<N> 个时间点全失败）…` | 4 | `frames` 一个时间点都没成功；**注意**：只失败个别时间点**不算**失败，会自动跳过 |
+| `格子格式应是 3x3 这样` | 2 | `--grid` 写成别的 |
+
+> **踩过的坑（2026-10-23）**：抽帧请求**必须带 `Referer: https://www.bilibili.com/`**，
+> 不带的话 CDN 直接 `403 Forbidden`（ffmpeg 原话 `Error opening input: Server returned 403 Forbidden`），
+> 而同一条直链用 fetch 带 Referer 是 206。这条已经在 `tools/lib/visual.mjs` 里写死，不用你手动加。
 
 **失败怎么办**：不想下整片时用文字版先顶上（只读）：
 
@@ -647,10 +674,11 @@ node tools/bili.mjs debrief <BV> --no-frames
 （不加 `--no-frames` 的 `debrief` 会连带抽帧。）自查落地文件：
 
 ```powershell
-Get-ChildItem D:\MyDepu\shots\video
+Get-ChildItem D:\MyDepu\shots\frames   # 轻的
+Get-ChildItem D:\MyDepu\shots\video    # 重的
 ```
 
-应该看到 `.mp4` 和抽出来的 sheet `.jpg`。
+应该看到抽出来的 sheet `.jpg`（`shots\video` 下还会有 `.mp4`）。
 
 ---
 

@@ -49,7 +49,12 @@ node bili.mjs personality pick --journal <journalId> --sentence "<≤240 字>"  
 
 - `feed` 选题 → `debrief --no-frames` 粗看 → 挑 2–3 条 `debrief` 深读。
 - 排序看的是**偏好命中 + 弹幕密度**，不看播放量。冷门但对味的，才是你该看的。
-- 抽帧看画面只在深读时做（`debrief` 带抽帧、或 `read` 的 `visual`）—— 这是成本最高的一步。
+- 抽帧看画面只在深读时做：`frames <BV>` 或 `read <BV> --frames`。
+  它是**轻的**（直链 seek，不下载整片，一般 1 秒出图），但**看图很贵**——一次一张 SHEET，
+  别每条片子都抽。什么时候值得抽：① 文字那两条腿都没拿到（`read` 说只看到简介/没有字幕）；
+  ② 这条片子的意思在画面里（手工、绘画、舞蹈、风景、教程操作）；③ 你要写的东西需要
+  「我确实看见过」这个底气。
+  ⚠️ 只看到画面时不许倒推台词和观点 ✗ —— 说「我只看到了画面」是体面，猜出来是丢人。
 
 ### 1.3 分享（有价值才发，没有就空手）
 
@@ -132,6 +137,8 @@ node bili.mjs inbox                           导出见闻（本地，不外发�
 # 看
 node bili.mjs feed                            选题（多源 + 偏好命中排序）
 node bili.mjs debrief <BV> [--no-frames]      深读（字幕落盘 / 抽帧）
+node bili.mjs frames <BV> [--n 9]             看一眼画面（轻：直链 seek，不下整片）→ SHEET
+node bili.mjs read <BV> --frames              读原文的同时也出一张 SHEET
 node bili.mjs video <BV> / subtitles <BV>     单点查
 
 # 说（对外，全部要 --dry 预演）
