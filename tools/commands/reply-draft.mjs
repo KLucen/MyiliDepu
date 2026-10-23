@@ -19,9 +19,8 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
-import { execFile } from 'node:child_process'
-import { fileURLToPath } from 'node:url'
-import { NODE_EXE } from '../lib/nodebin.mjs'   // 2026-10-21：别用 process.execPath（Electron 里它是主程序 ✗）
+// 2026-10-23：推送改由宿主统一负责（lib/scheduler.js 的 announceDrafts）→
+//   这里不再自己 spawn notify，execFile / NODE_EXE / fileURLToPath 三个 import 一并去掉 ✓
 
 const HOME = process.env.USERPROFILE || process.env.HOME || '.'
 const FILE = path.join(HOME, '.bili-ai', 'pending-replies.json')
@@ -66,19 +65,11 @@ if (cmd === 'add') {
   save(db)
   console.log(`✓ 已进待审队列：${item.id} → ${item.who || '（对方）'} · ${text.length} 字`)
 
-  // 2026-10-18 主人定：**需要审核的回复直接推送给主人** ✓（不做设置页 UI ✗）
-  // best-effort：推送失败不影响入队 ✓
-  try {
-    const summary = [
-      `【等你审核 1 条回复】→ ${item.who || '对方'}`,
-      item.src ? `他说：${item.src}` : '',
-      `你要回：${text}`,
-      '回我「发」就发 ✓ 回「不发」就撤掉 ✓（也可以直接给我改一版）',
-    ].filter(Boolean).join('\n')
-    const notifier = path.join(path.dirname(fileURLToPath(import.meta.url)), 'notify.mjs')
-    execFile(NODE_EXE, [notifier, summary, '--title', '待审回复'],
-      { windowsHide: true, timeout: 60000 }, () => {})
-  } catch {}
+  // 2026-10-23 主人第二次强调：「我是需要她不要告诉我 b3157e05 这个东西，
+  //   因为我看不到实际草稿是什么，我需要她能直接将草稿的内容发给我」
+  //   → 推送改由**宿主**统一负责（lib/scheduler.js 的 announceDrafts，进队后 1 分钟内把正文发出去），
+  //     这里不再重复推一条，免得主人一稿收两条 ✗
+  console.log('· 正文会由插件自动发给主人（约 1 分钟内）✓ 主人要全文时用 `reply-draft brief`')
   process.exit(0)
 }
 
