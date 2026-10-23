@@ -12,6 +12,8 @@
 //   node reply-draft.mjs add --oid 123 --bvid BVxxx --root 456 --parent 789 \
 //        --who 对方昵称示例 --message "…" [--src "他说的话"]
 //   node reply-draft.mjs list [--json]
+//   node reply-draft.mjs show <id>        （只读：看一条的完整内容）
+//   node reply-draft.mjs brief            （可直接贴给主人的整块文本：含全文 + 怎么批注）
 //   node reply-draft.mjs drop <id>
 //   node reply-draft.mjs take <id>        （插件审批时用：取出参数并从队列删掉）
 import fs from 'node:fs'
@@ -109,6 +111,27 @@ if (cmd === 'show') {
   process.exit(0)
 }
 
+if (cmd === 'brief') {
+  // 2026-10-23 加：主人问「我实际看不到她的草稿是什么，怎么批注」——
+  //   她原来只发一句「有 2 条回复待你审核：新草稿 b3157e05 → yun_baoo」，
+  //   主人手里只有一个 8 位 id，正文躺在磁盘上 ✗。
+  //   这里打印一段**可以直接整块贴进私信/通知**的文本（含全文 + 怎么批注）。
+  const db = load()
+  if (!db.items.length) { console.log('（队列是空的 ✓ 没有等审的回复）'); process.exit(0) }
+  const when = (x) => { try { return new Date(x.at).toLocaleString('zh-CN', { hour12: false, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) } catch { return '' } }
+  const lines = [`有 ${db.items.length} 条回复等你审核（下面是全文，直接回我「发」/「不发」/「改成…」都行）：`]
+  for (const x of db.items) {
+    lines.push('')
+    lines.push(`【${x.id}】→ ${x.who || '对方'}${when(x) ? '（' + when(x) + '）' : ''}`)
+    if (x.src) lines.push(`  他说：${x.src}`)
+    lines.push(`  我想回：${x.message}`)
+  }
+  lines.push('')
+  lines.push('回我的时候带上 id 就行（例如「b3157e05 发」「812edadc 第二句太软，改成…」）✓')
+  console.log(lines.join('\n'))
+  process.exit(0)
+}
+
 if (cmd === 'drop' || cmd === 'take') {
   const id = opt._a
   if (!id) { console.error('用法: node reply-draft.mjs drop <id>'); process.exit(2) }
@@ -122,4 +145,4 @@ if (cmd === 'drop' || cmd === 'take') {
   process.exit(0)
 }
 
-console.log('用法: node reply-draft.mjs add … | list [--json] | drop <id> | take <id>')
+console.log('用法: node reply-draft.mjs add … | list [--json] | show <id> | brief | drop <id> | take <id>')

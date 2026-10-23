@@ -15,6 +15,20 @@
 
 > **每次推送到本仓库，这一节都会写上「这一版改了什么」**；逐版本完整记录（含每一条的命令、行号与实测结果）见 [CHANGELOG.md](CHANGELOG.md)。
 
+**v1.3.8（2026-10-23）· 待审草稿：把正文递到你手里**
+
+- **问题**：她要回别人的评论得先排队等审，草稿存在 `~/.bili-ai/pending-replies.json` 里 ——
+  而她私信只发一句「有 2 条回复待你审核：新草稿 b3157e05」。
+  **你在 B 站看不到草稿正文**，手里只有一个 8 位 id，根本没法批注。
+- **宿主每轮把队列连正文摆进她的唤醒提示**（最多 5 条，每条含 `他说了什么` + `你要回什么` 全文），
+  并硬性要求「通知主人时必须把全文原样贴上，只给 id ✗」。
+- **新增 `bili reply-draft brief`**：打印一段可以直接整块贴给你的文本（含全文 + 一句怎么批注）。
+  她用这条命令，你就不需要任何额外工具了。
+- **你要怎么批注**：直接在私信里带 id 回一句 —— 「b3157e05 发」「812edadc 第二句太软，改成…」。
+  她下次醒来第一件事就是看私信（`listen.dmWake`），按你的批注改一版，先 `reply-draft add` 新的再
+  `reply-draft drop` 旧的。说「发」她就 `comment --go`，说「不发」她就丢掉。
+- 顺带补上 `reply-draft show <id>` 的说明（只读看全文）与命令表描述。
+
 **v1.3.7（2026-10-23）· 她不再躺在侧栏的「未分组」里**
 
 - **根因不是权限，是没人给她登记**：侧栏分组**不按 cwd 猜**，只看工作区记录里的
@@ -255,7 +269,7 @@ node <插件目录>/tools/bili.mjs selftest --real    # 再加「真机十二问
 |---|---|
 | `bili comment --oid <aid> --bvid <BV> --message "…" [--root/--parent] --dry\|--go` | 发一条视频评论（带 `--root/--parent` 就是二级回复） |
 | `bili comment --oid <aid> --bvid <BV> --message "@主人 …" --share --auto --reason "…" --score N --rank 1 --dry\|--go` | 正式的「分享 @ 你」通道（受评分/额度/判重约束） |
-| `bili reply-draft add/list/show/drop/take` | 待审回复队列（发前审核） |
+| `bili reply-draft add/list/show/brief/drop/take` | 待审回复队列（发前审核）；`brief` 打印可直接贴给主人的全文 |
 | `bili comment-del <rpid> --dry\|--go` | 删除自己发的一条评论 |
 | `bili dm --status` / `bili dm --msg "…" [--share --target <BV> --reason "…" --score N --rank 1] --dry\|--go` | 私信专属通道：一天锁定一个收信人、只发主人、必须互关；带 `--share` 时占分享额度 |
 | `bili dynamic list` / `bili dynamic post --text "…" --dry\|--go` / `bili dynamic rm --id <dyn_id> --dry\|--go` | 动态的列表 / 发布 / 删除 |
