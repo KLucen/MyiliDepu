@@ -151,7 +151,7 @@
 | `personality.enabled` | `true` | 布尔 | 是否从见闻里提炼人格札记（`human-world.md`） |
 | `personality.inject` | `true` | 布尔 | 是否把最近几句带进唤醒提示 |
 | `personality.maxChars` | `3000` | 200–20000（钳制） | 注入的人格札记最多多少字 |
-| `personality.pickPerDay` | `1` | 0–2（钳制） | 每天最多提炼几句 |
+| `personality.pickPerDay` | `0` | 0–20（钳制） | 每天最多提炼几句。**0 = 不限**（默认）—— 只有设成大于 0 才会卡；"宁缺毋滥"由手册约束她，不由条数卡 |
 
 ### 双日记（`diary`）—— 合并新增
 

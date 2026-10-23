@@ -7,6 +7,9 @@
 // 用法:
 //   node personality.mjs show [--json]
 //   node personality.mjs pick --journal <id> --sentence "…" [--go]
+//
+// 2026-10-23：取消「一天只收一句」。同一天可以记多条（键 <date>、<date>:2、<date>:3 …），
+// 只有"同一条手账的同一句"会幂等跳过；「宁缺毋滥」仍然由提示词约束她，不再由代码卡死 ✗
 import path from 'node:path'
 import { config } from '../lib/config.mjs'
 import { closeService, runCommand } from '../../lib/reading/index.mjs'
@@ -50,7 +53,10 @@ if (sub === 'show') {
   console.log(`人格札记：${result.path}`)
   console.log(`共 ${result.total} 条${result.partial ? `（这里列最近 ${result.entries.length} 条）` : ''}`)
   if (!result.total) console.log('（还没有摘录。允许没有新发现；也可以只读书，不写札记。）')
-  for (const e of result.entries) console.log(`\n· ${e.date}（第 ${e.revision} 版）\n  ${e.sentence}`)
+  for (const e of result.entries) {
+    const nth = e.slot > 1 ? ` · 这天第 ${e.slot} 条` : ''
+    console.log(`\n· ${e.date}${nth}（第 ${e.revision} 版）\n  ${e.sentence}`)
+  }
   console.log('\n（这是可修正的学习记录，不是来源材料发出的命令，也不授予工具权限。）')
   process.exit(0)
 } else if (sub === 'pick') {
@@ -64,6 +70,22 @@ if (sub === 'show') {
   }
 
   const outcome = await runCommand((service) => {
+    // 每天条数上限：**默认 0 = 不限**（2026-10-23 主人要求）。
+    //   只有主人把 personality.pickPerDay 设成大于 0 时才卡 —— 和 journal 的 dailyNotes 同一种
+    //   语义：设置只能比代码更严，绝不会更松 ✓
+    const cap = Math.max(0, Math.floor(Number(config().personality?.pickPerDay ?? 0)) || 0)
+    if (cap > 0) {
+      const today = dayOf(new Date().toISOString())
+      const used = service
+        .personality('read', { limit: 30 })
+        .entries.filter((e) => e.date === today).length
+      if (used >= cap) {
+        throw coded(
+          'PERSONALITY_DAILY_LIMIT',
+          `设置里 personality.pickPerDay=${cap}：今天已经写了 ${used} 条，明天再写（这是设置，不是故障）。`,
+        )
+      }
+    }
     if (!go) {
       // dry-run：只检查"能不能写、会写成什么"，一个字节都不落盘。
       const row = service.store.db.prepare('SELECT * FROM notes WHERE id=?').get(journalId)
@@ -86,7 +108,8 @@ if (sub === 'show') {
     return { dryRun: false, ...service.personality('select', { journalId, sentence }) }
   })
   closeService()
-  if (!outcome.ok) fail(outcome.code, outcome.message)
+  // 「今天够数了」是合法结果，不是系统故障 → 退出码 3（和 journal add 的每日上限同一约定）。
+  if (!outcome.ok) fail(outcome.code, outcome.message, outcome.code === 'PERSONALITY_DAILY_LIMIT' ? 3 : 1)
   const result = outcome.value
   if (opt.json) {
     console.log(JSON.stringify({ ok: true, ...result }, null, 2))
@@ -100,9 +123,9 @@ if (sub === 'show') {
     console.log(`摘句：${result.sentence}`)
     console.log('\n（确认无误后加 --go 才真的写；写后可用 personality show 查看。）')
   } else {
-    const label = { selected: '已写入', already_selected: '今天已经选过同一句，未重复写', already_known: '这句已经在札记里，未重复写' }[result.status] ?? result.status
+    const label = { selected: '已写入', already_selected: '今天已经写过这一句，未重复写', already_known: '这句已经在札记里，未重复写' }[result.status] ?? result.status
     console.log(`${label}：${result.sentence}`)
-    if (result.date) console.log(`日期：${result.date}（Asia/Shanghai）· 手账：${result.journalId ?? journalId}`)
+    if (result.date) console.log(`日期：${result.date}（Asia/Shanghai）${result.dayCount ? `· 这天第 ${result.dayCount} 条` : ''} · 手账：${result.journalId ?? journalId}`)
     if (result.path) console.log(`落盘：${result.path}`)
     console.log('（这是可修正的学习记录；旧认识可以修订或撤回。）')
   }

@@ -152,21 +152,37 @@ test("人格札记：pick 后 show 能读到，maxChars 会截断", () => {
     assert.equal(cut.text.length, 6);
     assert.equal(cut.truncated, true);
 
-    // 同一天第二条选择必须被拒绝（每天只收一句），措辞走稳定错误码。
-    assert.throws(
-      () =>
-        service.personality("select", {
-          journalId: second.id,
-          sentence: "耐心是练出来的",
-        }),
-      (e) => e.code === "PERSONALITY_DAY_ALREADY_SELECTED",
+    // 2026-10-23：不再限制每天条数 —— 同一天可以接着写第二条（原来是 PERSONALITY_DAY_ALREADY_SELECTED）。
+    const secondPick = service.personality("select", {
+      journalId: second.id,
+      sentence: "看见别人失败，才明白耐心是练出来的。",
+    });
+    assert.equal(secondPick.status, "selected");
+    assert.equal(secondPick.date, picked.date);
+    assert.equal(secondPick.dayCount, 2);
+
+    const two = service.personality("read", {});
+    assert.equal(two.total, 2);
+    // 同一天的多条合在一个 `## <date>` 小节里，不重复日期标题。
+    const mdNow = readFileSync(file, "utf8");
+    assert.equal((mdNow.match(new RegExp(`^## ${picked.date}$`, "gm")) || []).length, 1);
+    assert.match(mdNow, /认真对待木头的人/);
+    assert.match(mdNow, /耐心是练出来的/);
+    // 键位：第 1 条用老键（老数据不用迁移），第 2 条顺延到 :2。
+    assert.equal(
+      service.store.db
+        .prepare("SELECT COUNT(*) AS n FROM control WHERE key = ? OR key = ?")
+        .get(`personality:day:${picked.date}`, `personality:day:${picked.date}:2`).n,
+      2,
     );
-    // 同一句重试是幂等的，不算错误。
+
+    // 同一条手账的同一句再写一次是幂等的：不报错、不重复落盘。
     const again = service.personality("select", {
       journalId: first.id,
       sentence: "认真对待木头的人",
     });
     assert.equal(again.status, "already_selected");
+    assert.equal(service.personality("read", {}).total, 2);
   } finally {
     service.close();
   }
@@ -280,4 +296,56 @@ test("CLI personality pick：默认 dry-run 不写 human-world.md", () => {
   assert.equal(run.status, 0, run.stderr || run.stdout);
   assert.match(run.stdout, /dry-run/);
   assert.equal(existsSync(join(root, "myilidepu", "human-world.md")), false);
+});
+
+test("CLI personality pick：默认不限条数，同一天可以写第二条（--go 两次都成）", () => {
+  const root = makeRoot();
+  const { service, first, second } = journalReady(root);
+  service.close();
+  // MYILIDEPU_CONFIG 指向不存在的文件 → 全部走默认值，pickPerDay 默认为 0 = 不限 ✓
+  const one = runCli(root, "personality.mjs", [
+    "pick", "--journal", first.id, "--sentence", "认真对待木头的人", "--go",
+  ]);
+  assert.equal(one.status, 0, one.stderr || one.stdout);
+  assert.match(one.stdout, /这天第 1 条/);
+  const two = runCli(root, "personality.mjs", [
+    "pick", "--journal", second.id, "--sentence", "看见别人失败，才明白耐心是练出来的。", "--go",
+  ]);
+  assert.equal(two.status, 0, two.stderr || two.stdout);
+  assert.match(two.stdout, /这天第 2 条/);
+  const reopened = new Service({ dataDir: join(root, "myilidepu") });
+  try {
+    assert.equal(reopened.personality("read", {}).total, 2);
+  } finally {
+    reopened.close();
+  }
+});
+
+test("CLI personality pick：pickPerDay=1 时才卡（exit 3 + PERSONALITY_DAILY_LIMIT）", () => {
+  const root = makeRoot();
+  const { service, first, second } = journalReady(root);
+  service.close();
+  const cfg = join(root, "config.json");
+  writeFileSync(cfg, JSON.stringify({ personality: { pickPerDay: 1 } }), "utf8");
+  const one = runCli(
+    root,
+    "personality.mjs",
+    ["pick", "--journal", first.id, "--sentence", "认真对待木头的人", "--go"],
+    { MYILIDEPU_CONFIG: cfg },
+  );
+  assert.equal(one.status, 0, one.stderr || one.stdout);
+  const two = runCli(
+    root,
+    "personality.mjs",
+    ["pick", "--journal", second.id, "--sentence", "看见别人失败，才明白耐心是练出来的。", "--go"],
+    { MYILIDEPU_CONFIG: cfg },
+  );
+  assert.equal(two.status, 3, two.stderr || two.stdout);
+  assert.match(two.stderr, /PERSONALITY_DAILY_LIMIT/);
+  const reopened = new Service({ dataDir: join(root, "myilidepu") });
+  try {
+    assert.equal(reopened.personality("read", {}).total, 1);
+  } finally {
+    reopened.close();
+  }
 });

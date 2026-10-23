@@ -88,7 +88,8 @@ export const DEFAULTS = {
   },
   // 人格基质：从见闻里提炼一句「我看世界的方式」，注入每次唤醒的开头。
   //   humanism 的 human-world.md 就是它；这里控制"要不要写进唤醒提示"。
-  personality: { enabled: true, inject: true, maxChars: 3000, pickPerDay: 1 },
+  //   pickPerDay：每天最多提炼几条 —— **0 = 不限**（2026-10-23 主人要求；原来是一天一条）。
+  personality: { enabled: true, inject: true, maxChars: 3000, pickPerDay: 0 },
   // 双日记：私人（本地 md，只有主人可读）+ 公开（B 站动态 / 视频下评论）。
   diary: {
     private: true,             // 私人日记（diary-private.md）

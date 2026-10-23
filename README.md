@@ -15,6 +15,18 @@
 
 > **每次推送到本仓库，这一节都会写上「这一版改了什么」**；逐版本完整记录（含每一条的命令、行号与实测结果）见 [CHANGELOG.md](CHANGELOG.md)。
 
+**v1.3.6（2026-10-23）· 人格札记不再限制每天条数**
+
+- **一天想记几条就记几条**：以前 `personality pick` 是一天只收一句（同一天第二次会报
+  `PERSONALITY_DAY_ALREADY_SELECTED`），现在取消了。第 1 条仍用原来的键
+  `personality:day:<日期>`，第 2 条起顺延为 `<日期>:2`、`<日期>:3`…… —— **老数据不用迁移**，
+  `human-world.md` 里同一天的多条合在一个 `## <日期>` 小节下。
+- **仍然防重复**：同一条见闻的同一句今天再写一次会被幂等跳过（`already_selected`），
+  同一句在任何一天写过都算 `already_known`，不会重复落盘。
+- **"宁缺毋滥"改由提示词约束**：条数上限从代码里拿掉，但手册里那句「没有真发现就一个词都别写」
+  一个字没松 —— 没有上限不等于要凑数。
+- 顺带：`personality show` 现在会标出「这天第 N 条」，`pick` 会告诉你今天已经写到第几条。
+
 **v1.3.5（2026-10-23）· 你在 B 站关注了谁，她自己知道（关注名单自动同步）**
 
 - **关注即入列**：你**用她的账号**在 B 站点了关注，她会**在后台**每 5 分钟看一眼关注列表（最多 5 分钟延迟），把新关注按
@@ -202,7 +214,7 @@ node <插件目录>/tools/bili.mjs selftest --real    # 再加「真机十二问
 | `bili journal show [--date YYYY-MM-DD] [--json]` | 看今天的见闻账本 |
 | `bili journal add --reading <id> --file <json>` | 把一条见闻记进账本（必须有 `encounter` 和 `missing`；证据最多 20 条；≥2 条/天会被拒） |
 | `bili personality show [--json]` | 看人格札记（`human-world.md`） |
-| `bili personality pick --journal <id> --sentence "…" [--go]` | 从一条见闻里摘一句写进人格札记（默认 dry-run，`--go` 才写入；一句 ≤240 字） |
+| `bili personality pick --journal <id> --sentence "…" [--go]` | 从一条见闻里摘一句写进人格札记（默认 dry-run，`--go` 才写入；一句 ≤240 字，**每天条数不限**） |
 | `bili inbox [--json]` | 导出见闻收件箱（刷新 `inbox.md` / 网页版 / 索引，只读账本） |
 
 **看片**
