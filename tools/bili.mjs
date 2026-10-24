@@ -13,7 +13,7 @@ const map = {
   // 全部只读本地账本/网络读接口，任何一步都不写平台。
   candidates: ['commands/candidates.mjs', '学习候选（最多 3 条，只读）：[--count N] [--json] —— 先挑一条真的想了解的'],
   read: ['commands/read.mjs', '读一条视频的原文（字幕/官方总结/本地原文，只读）：<BV|URL> [--page N] [--route auto|subtitle|conclusion|local] [--frames [N]] [--grid CxR] [--json] —— 加 --frames 顺出一张九宫格 SHEET（轻：直链 seek）'],
-  journal: ['commands/journal.mjs', '见闻账本：show 查看 / add 记一条（本地可审阅草稿，≤2 条/天，超限退出码 3）'],
+  journal: ['commands/journal.mjs', '见闻账本：show 查看 / add 记一条（本地可审阅草稿；条数按 learning.dailyNotes，0 = 不限；超额退出码 3）'],
   personality: ['commands/personality.mjs', '人格札记（可修正的学习记录）：show 查看 / pick 摘一句（默认 dry-run，--go 才写入）'],
   inbox: ['commands/inbox.mjs', '见闻收件箱导出（给主人看全套）：刷新 inbox.md / 网页版 / 索引导出，只读账本'],
   session: ['verify/session.mjs', '确认凭据属于哪个号'],

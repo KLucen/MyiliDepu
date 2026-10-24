@@ -43,7 +43,7 @@ node tools/bili.mjs <命令> ...
  │     store.mjs     node:sqlite 账本（readings / notes / personality / inbox / tasks）
  │     budget.mjs / token-gate.mjs / errors.mjs
  ├─ lib/ledger/     【移植自 humanism】账本策略
- │     journal-policy.mjs  见闻 ≤2 条/天（同一 SQLite 事务内强制）
+ │     journal-policy.mjs  见闻额度（同一 SQLite 事务内强制；默认 ≤2 条/天，配置 0 = 不限）
  │     personality.mjs     人格札记 human-world.md 的读写与修订
  │     inbox.mjs           见闻收件箱导出（有界导出）
  └─ prompts/humanistic-reading.md  读原文时的提示词
@@ -107,5 +107,5 @@ node tools/bili.mjs <命令> ...
 - **只读**：`lib/reading/` 只做「读原文 → 落账 → 人格札记 → 收件箱导出」，**没有**平台写操作（评论/点赞/投币/发动态的执行器不在这一层）。
 - **无 Python、无抽帧/ASR**：v1.0 不移植 humanism 的 `media.py` / 抽帧 / 本地 ASR 与 `writer.mjs`；`lib/reading/index.mjs` 明确不再需要 `pythonPath` 与视觉工具。
 - **评论端点保持关闭**：humanism 上游 AGENTS.md 的硬约束继续有效——不新增评论开关/工具/允许的端点，不新增任意转发、任意调度、共享凭据或自动外部安装/排程。
-- **见闻上限**：≤2 条/天，且限额检查与插入在**同一个 SQLite 事务**里（`lib/ledger/journal-policy.mjs`）；时间按 Asia/Shanghai 算。超限返回 `JOURNAL_DAILY_LIMIT`（CLI 退出码 3）。
+- **见闻额度**：默认 ≤2 条/天（`learning.dailyNotes`，**0 = 不限**——2026-10-25 主人要求取消上限），额度检查与插入在**同一个 SQLite 事务**里（`lib/ledger/journal-policy.mjs`）；时间按 Asia/Shanghai 算。超额返回 `JOURNAL_DAILY_LIMIT`（CLI 退出码 3）；`learning.recordNotes=false` 时返回 `JOURNAL_RECORDING_OFF`（同样退出码 3）。
 - **判重**：同一视频/同一目标/同一视频 7 天等判重由 `tools/lib/share-policy.mjs` 与 `tools/commands/quota.mjs` 执行；分享还要求打分 ≥ `share.minScore`、`--reason` ≥8 字、`--rank 1`。

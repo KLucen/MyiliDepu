@@ -92,12 +92,13 @@ if (sub === 'show') {
   const readingId = typeof opt.reading === 'string' ? opt.reading : null
   const file = typeof opt.file === 'string' ? opt.file : null
   if (!readingId || !file) fail('USAGE', USAGE, 2)
-  // 学习设置里 dailyNotes=0 = "今天不写见闻"。它不是账本硬上限（≤2 条仍在事务内强制），
-  // 而是人类设置这一层；同样用退出码 3 让调度流按"跳过"处理，而不是当系统故障重试。
-  // 注意：设置只可能比硬上限更严，绝不会放宽它。
-  const dailyNotes = Number(config().learning?.dailyNotes ?? 2)
-  if (!(dailyNotes > 0))
-    fail('JOURNAL_DAILY_LIMIT', '设置里 learning.dailyNotes=0：今天不写见闻（这是设置，不是故障）。', 3)
+  // 2026-10-25：额度改成"跟着配置走"——learning.dailyNotes 现在**就是上限本身**
+  //   （>0 = 每天最多几条；**0 = 不限**，取消了原来写死的 ≤2 条），由 Service →
+  //   journal-policy 在同一个 SQLite 事务里强制，这里不再自己拦一道。
+  //   这里只挡"只读不记"（learning.recordNotes=false）；同样用退出码 3 让调度流
+  //   按"跳过"处理，而不是当系统故障重试。
+  if (config().learning?.recordNotes === false)
+    fail('JOURNAL_RECORDING_OFF', '设置里 learning.recordNotes=false：今天只读不记（这是设置，不是故障）。', 3)
   let raw
   try {
     raw = JSON.parse(fs.readFileSync(file, 'utf8'))

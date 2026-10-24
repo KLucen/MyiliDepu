@@ -297,7 +297,7 @@ node tools/bili.mjs comments <BV> --ps 20 --pn 1 --sort hot --json
 
 **证明**：SQLite 账本在这台机器上能写、能读，每日上限真的生效。
 
-> ⚠️ **这一步会写本地账本，并占掉今天的见闻额度。** 见闻硬上限是 **2 条/天（Asia/Shanghai）**，由事务内的 journal-policy 强制。**别为了测试连写几条**——要么就写一条你**真的**想留的见闻。它只写本地，不碰平台。
+> ⚠️ **这一步会写本地账本，并占掉今天的见闻额度。** 额度是 `learning.dailyNotes`（默认 **2 条/天**，Asia/Shanghai；**填 0 = 不限**），由事务内的 journal-policy 强制。**别为了测试连写几条**——要么就写一条你**真的**想留的见闻。它只写本地，不碰平台。
 
 **第一步：造一个没有 BOM 的 JSON**（`encounter` / `missing` 必填，`evidence` 最多 20 条）
 
@@ -340,7 +340,8 @@ node tools/bili.mjs journal show
 | `USAGE: journal show [--date YYYY-MM-DD] [--json] \| journal add --reading <id> --file <json路径>` | 2 | 少参数 |
 | `INVALID_FILE: 读不到或解析不了 --file（…）：…` | 2 | 路径错 / BOM / JSON 语法错 |
 | `INVALID_DATE: --date 格式是 YYYY-MM-DD` | 2 | `--date` 写错 |
-| `JOURNAL_DAILY_LIMIT: …` | 3 | 今天已经 2 条，或 `learning.dailyNotes=0`。**这是"满额"，不是故障**——调度流按"跳过"处理，不重试 |
+| `JOURNAL_DAILY_LIMIT: …` | 3 | 已经写满 `learning.dailyNotes` 条（默认 2；填 0 = 不限，就不会再出现这条）。**这是"满额"，不是故障**——调度流按"跳过"处理，不重试 |
+| `JOURNAL_RECORDING_OFF: …` | 3 | `learning.recordNotes=false`：主人设成"只读不记"。**是设置，不是故障** |
 | 任何 `CODE: 原因` + 退出码 1 | 1 | 账本 / 服务层错误 |
 
 **失败怎么办**：`INVALID_FILE` → 用上面 `.NET` 那条重造 JSON，再 `Get-Content "$env:TEMP\smoke-journal.json" -Raw` 确认第一个字符是 `{` 而不是 `﻿{`。`JOURNAL_DAILY_LIMIT` → 明天再来，别删账本。

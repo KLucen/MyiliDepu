@@ -253,7 +253,7 @@ test("CLI journal add：超过每日上限时退出码 3 且 stderr 带 JOURNAL_
   assert.equal(run.stdout.trim(), "");
 });
 
-test("CLI journal add：设置 dailyNotes=0 时按设置拒绝（exit 3，不是故障）", () => {
+test("CLI journal add：dailyNotes=0 = 不限，第 3 条也能写进去（2026-10-25 取消上限）", () => {
   const root = makeRoot();
   const { service, first } = journalReady(root);
   service.close();
@@ -267,18 +267,87 @@ test("CLI journal add：设置 dailyNotes=0 时按设置拒绝（exit 3，不是
     ["add", "--reading", first.readingId, "--file", file],
     { MYILIDEPU_CONFIG: cfg },
   );
-  assert.equal(run.status, 3, run.stderr || run.stdout);
-  assert.match(run.stderr, /JOURNAL_DAILY_LIMIT/);
-  assert.equal(run.stdout.trim(), "");
-  // 拒绝发生在开账本之前/之内都不该留下第 3 条。
+  assert.equal(run.status, 0, run.stderr || run.stdout);
   const reopened = new Service({ dataDir: join(root, "myilidepu") });
   try {
     assert.equal(
       reopened.store.db.prepare("SELECT count(*) AS n FROM notes").get().n,
-      2,
+      3,
     );
   } finally {
     reopened.close();
+  }
+});
+
+test("CLI journal add：recordNotes=false = 只读不记（exit 3，不是故障）", () => {
+  const root = makeRoot();
+  const { service, first } = journalReady(root);
+  service.close();
+  const cfg = join(root, "config.json");
+  writeFileSync(
+    cfg,
+    JSON.stringify({ learning: { recordNotes: false } }),
+    "utf8",
+  );
+  const file = join(root, "note.json");
+  writeFileSync(file, JSON.stringify(note(5)), "utf8");
+  const run = runCli(
+    root,
+    "journal.mjs",
+    ["add", "--reading", first.readingId, "--file", file],
+    { MYILIDEPU_CONFIG: cfg },
+  );
+  assert.equal(run.status, 3, run.stderr || run.stdout);
+  assert.match(run.stderr, /JOURNAL_RECORDING_OFF/);
+  assert.equal(run.stdout.trim(), "");
+});
+
+test("见闻额度：journalDailyLimit=0 = 不限（第 3 条写得进去，remaining 是 null 不是 Infinity）", () => {
+  const root = makeRoot();
+  const { service, reading } = journalReady(root); // 已按默认额度写满 2 条
+  service.close();
+  const open = new Service({
+    dataDir: join(root, "myilidepu"),
+    journalDailyLimit: 0,
+  });
+  try {
+    const before = open.status().journals;
+    assert.equal(before.limit, 0);
+    assert.equal(before.used, 2);
+    assert.equal(before.remaining, null);
+    // JSON 里也必须是 null：Infinity 会被序列化成 null，但那是"坏值被吞"，
+    //   不如这里显式断言序列化前后一致。
+    assert.equal(JSON.parse(JSON.stringify(before)).remaining, null);
+    const third = open.journal(reading.id, note(9));
+    assert.equal(third.deduplicated, false);
+    assert.equal(
+      open.store.db.prepare("SELECT count(*) AS n FROM notes").get().n,
+      3,
+    );
+  } finally {
+    open.close();
+  }
+});
+
+test("见闻额度：journalDailyLimit=1 时超额的条目在同一事务内被拒", () => {
+  const root = makeRoot();
+  const { service, reading } = journalReady(root); // 账本里已有 2 条 → 已超 1 条的额度
+  service.close();
+  const open = new Service({
+    dataDir: join(root, "myilidepu"),
+    journalDailyLimit: 1,
+  });
+  try {
+    assert.throws(
+      () => open.journal(reading.id, note(9)),
+      (e) => e.code === "JOURNAL_DAILY_LIMIT",
+    );
+    assert.equal(
+      open.store.db.prepare("SELECT count(*) AS n FROM notes").get().n,
+      2,
+    );
+  } finally {
+    open.close();
   }
 });
 

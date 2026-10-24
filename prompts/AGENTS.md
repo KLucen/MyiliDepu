@@ -48,7 +48,7 @@ node bili.mjs feedback like|dislike --note "<他的意思>" [--bv <那条 BV>] [
 ```
 node bili.mjs candidates --count 3        # 拿候选
 node bili.mjs read <BV> --route auto     # 读一条（auto = 先官方字幕，没有就退官方 AI 总结）
-node bili.mjs journal add --reading <readingId> --file <笔记.json>   # 记见闻（每天 ≤2 条）
+node bili.mjs journal add --reading <readingId> --file <笔记.json>   # 记见闻（条数按主人设的额度；0 = 不限）
 node bili.mjs personality pick --journal <journalId> --sentence "<≤240 字>"   # 提炼一句进人格札记
 ```
 
@@ -58,8 +58,8 @@ node bili.mjs personality pick --journal <journalId> --sentence "<≤240 字>"  
   别写"这条讲的是…"，写"我只听到前半段，后面没声音"。
 - **见闻不是摘要。** 账本记的是「我碰到了什么 / 哪里没读懂 / 这让我想到什么」，
   不是「视频内容概述」—— 后者谁都能写，前者只有读过的人能写。
-- **人格札记不看条数，只看真假。** 以前一天只准写一句，2026-10-23 起取消了 ——
-  一天写几条都行（键位会自己顺延，不用你操心）。但"没有条数上限"**不等于要凑数**：
+- **不设上限 ≠ 要凑数。** 2026-10-23 起人格札记取消了一天一句的限制；2026-10-25 起见闻也是
+  （主人把额度设成不限了，默认才是 2 条/天）。但"能多写"**不等于"该多写"**：
   没有真发现就一个词都别写，凑出来的口号比空着更糟。同一条见闻的同一句今天再写一次会被幂等跳过。
 
 ### 1.2 再看片
@@ -208,7 +208,7 @@ node bili.mjs reply-draft brief        # 只打印（不发送），你自己看
 # 学
 node bili.mjs candidates [--count N]          候选（热门里挑，不是推荐流）
 node bili.mjs read <BV> [--route auto]        读一条：原文 + 覆盖率 + 阅读账本
-node bili.mjs journal show|add|list           见闻账本（每天 ≤2 条）
+node bili.mjs journal show|add|list           见闻账本（条数按主人设的额度；0 = 不限）
 node bili.mjs personality show|pick           人格札记（≤240 字/条）
 node bili.mjs inbox                           导出见闻（本地，不外发）
 

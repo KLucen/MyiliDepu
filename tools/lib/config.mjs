@@ -80,7 +80,10 @@ export const DEFAULTS = {
   learning: {
     enabled: true,
     everyWake: true,           // 每次醒来先学习，再去看片（false = 只按 dailyNotes 攒够再学）
-    dailyNotes: 2,             // 见闻条数/天（账本内硬性 ≤ 2，与 humanism 的日志上限一致）
+    // 见闻条数/天：>0 = 每天最多几条；**0 = 不限**（2026-10-25 主人要求取消上限）。
+    //   限额在账本事务里强制（lib/ledger/journal-policy.mjs），不在提示词里说了算。
+    dailyNotes: 2,
+    recordNotes: true,         // false = 只读不记（照样读原文，但不往见闻账本里写）
     candidates: 3,             // 一次最多给几个候选
     maxChars: 16000,           // 单条原文上限（按字符切页，省 token）
     maxSessionTokens: 600000,  // 一个会话累计 token 闸门（humanism 的 maxSessionTokens）

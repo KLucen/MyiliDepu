@@ -1,3 +1,49 @@
+## v1.4.0（2026-10-25）见闻额度不再写死 2 条 —— 上限归配置管
+
+主人原话：「将见闻额度的上限也取消掉」。
+
+### 1 改了什么
+
+以前「见闻 ≤ 2 条/天」是**写死在代码里**的硬上限（`journal-policy.mjs` 里的常量），
+设置页那个「每天见闻条数」只能往**更严**的方向调（0–2），没法放宽。现在这个键**就是额度本身**：
+
+| `learning.dailyNotes` | 含义 |
+|---|---|
+| `0`（**新语义**） | **不限** —— 读懂了就记，一天记几条都行 |
+| `1`–`99` | 每天最多这么多条 |
+| 没填 / 非数字 | 退回默认 `2` |
+
+- `lib/ledger/journal-policy.mjs`：`journalDailyStatus(store, at, limit)` 与
+  `enforceJournalDailyLimit(store, at, limit)` 接受额度参数；`limit` 为 0 时不再拦。
+  `JOURNAL_DAILY_LIMIT = 2` 降级为**默认值**（账本默认 2 条/天，与 humanism 老规矩一致）。
+  不限时 `remaining` 返回 `null` —— 不用 `Infinity`，因为它会进 JSON（`--json` 与
+  `/dsh-bili/api/learn-status`），序列化成 `null` 反而看不出是"不限"。
+- `lib/reading/service.mjs` / `lib/reading/index.mjs`：额度从 `learning.dailyNotes` 传进账本，
+  检查仍在**同一个 BEGIN IMMEDIATE 事务**里（并发/重试都挤不进超额条目）。
+- `lib/index.js`：后端夹边界从「0–2，且 `|| 0`」改成 `Number.isFinite` 判定 + 0–99 ——
+  和 `personality.pickPerDay` 同一个坑：`|| 2` 会把 0 吃成 2，"不限"根本存不进去。
+- 设置页那个数字框上限从 2 提到 99，提示语改成「**0 = 不限**」。
+
+### 2 「只读不记」拆成独立开关
+
+0 原来表示"今天不写见闻"，现在被"不限"占用了。为了不丢这个能力，新增
+`learning.recordNotes`（默认 `true`）：设成 `false` = **只读不记** —— 她照样读原文，
+但不往见闻账本里写。拒绝时返回 `JOURNAL_RECORDING_OFF`（CLI 退出码 3，
+和"满额"一样按"跳过"处理，不当故障重试），设置页新开关「记见闻（写账本）」。
+
+### 3 同步改掉的说法
+
+`prompts/AGENTS.md`（"不设上限 ≠ 要凑数"）、`README.md`（每日流程第 1 条 / 第三节硬约束 /
+第四节设置项 / 命令表）、`docs/CONFIG.md`、`docs/ARCHITECTURE.md`、`docs/SMOKE.md`
+（Q4 与退出码表）、`tools/bili.mjs` 命令说明。
+
+### 4 验证
+
+- 新增 3 个用例：`journalDailyLimit=0` 时第 3 条写得进去且 `remaining === null`
+  （含 JSON 序列化前后一致）、`journalDailyLimit=1` 时超额在同一事务内被拒且不留行、
+  `dailyNotes=0` 走 CLI 真能写进第 3 条。另把 `recordNotes=false` 的 CLI 用例补上。
+- `tests/ledger.test.mjs` 11/11；全量见本次提交的 README「更新了什么」。
+
 ## v1.3.11（2026-10-23）评论 / 回复也能带图 —— 更正 v1.3.10 的一句错话
 
 主人一句话把上一版的结论推翻了：「B 站的评论确实可以带图片」。

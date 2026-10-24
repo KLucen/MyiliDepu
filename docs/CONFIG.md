@@ -138,7 +138,8 @@
 |---|---|---|---|
 | `learning.enabled` | `true` | 布尔 | 是否学习人类世界（给条数时后端会自动置 true） |
 | `learning.everyWake` | `true` | 布尔 | 每次醒来先学一条，再去看片 |
-| `learning.dailyNotes` | `2` | 0–2（钳制；账本内硬上限 2） | 每天最多记几条见闻 |
+| `learning.dailyNotes` | `2` | 0–99（**0 = 不限**） | 每天最多记几条见闻（额度由账本事务强制；2026-10-25 起取消了写死的 ≤2） |
+| `learning.recordNotes` | `true` | 布尔 | `false` = 只读不记：照样读原文，但不往见闻账本里写 |
 | `learning.candidates` | `3` | 1–3（钳制） | 一次给几个候选 |
 | `learning.maxChars` | `16000` | 500–200000（钳制） | 单条原文最多读多少字符（按页切） |
 | `learning.maxSessionTokens` | `600000` | 50000–10000000（钳制） | 一个会话累计 token 闸门 |
