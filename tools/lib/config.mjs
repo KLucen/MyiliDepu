@@ -56,7 +56,10 @@ export const DEFAULTS = {
   //     发现新关注就按 { name, mid, topics } 追加进上面的 watchups ✓
   //   · 只增不减：取关只报告，不会把条目从 watchups 删掉（主人可能还想让她继续看那位的稿子）
   //   · topics 是**给新条目**套的默认汇报重点（已有的条目一个字都不动）
-  //   · maxAdd：一次最多写几条（防某天关注了几百人把配置撑爆；剩下的下一轮继续）
+  //   · maxAdd：一次最多写几条（防某天关注了几百人把配置撑爆；剩下的下次点按钮继续）
+  //   · enabled **已废弃**（2026-10-25 主人要求）：同步不再自动跑，改成设置页里
+  //     一个按钮（宿主路由 POST /dsh-bili/api/follows/sync → `follows sync --go`）。
+  //     为什么连"6 小时一次"也不行：只要它还在没人要求时自己发请求，就还有下一次撞 412 的机会 ✗
   follows: { enabled: true, topics: [], maxAdd: 10 },
   notify: { type: 'none', url: '', template: 'text', cmd: '' },   // none | desktop | webhook | command（见 commands/notify.mjs）
   aliases: [],                  // 历史昵称（兜底用；当前昵称仍从 nav 动态读）

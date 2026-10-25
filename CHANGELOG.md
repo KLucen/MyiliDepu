@@ -1,3 +1,51 @@
+## v1.4.2（2026-10-25）关注同步改成设置页里的一个按钮
+
+主人原话：「修改关注同步逻辑，将关注同步做成一个按钮放在 dsh 的我的分身的设置里，
+就不用每次醒来都去同步关注了」。
+
+### 改了什么
+
+1. **`lib/scheduler.js`：自动同步整套拆掉。**
+   删 `import { syncFollows }`、`syncFollowsOnWake()`、`kickFollowsSync()`、`FOLLOWS_SYNC_MS`
+   与 `followsSyncing/followsSyncAt/followsNote` 三个模块级变量 —— 生物钟路径上**一枚网络请求都不发**。
+   取而代之：`takeFollowsNote()` 读一张便条 `<数据目录>/follows-note.json`
+   （按钮写完，她下次醒来看到一句话，读完 `rmSync` 清掉 ✓）。
+   保留 `extra.follows` 的提示词槽位（skip 分支与 wakePrompt 两处文案不动）。
+   > 为什么不能只是"把间隔调大"：v1.4.1 已经把间隔从 5 分钟改成 6 小时，
+   > 但只要它还在**没人要求**的情况下自己发请求，就永远有下一次撞 412 的机会 ✗
+
+2. **`lib/index.js`：新路由 `POST /dsh-bili/api/follows/sync`。**
+   回环校验 → 只收 POST → 跑 `node <bili.mjs> follows sync --go --json`（`--go` 不可省，
+   否则是 dry-run：点了按钮却什么都没写）→ 有新增就写便条 → 记一条 `follows-sync` 事件到
+   `<数据目录>/log.jsonl` → 回 `{ok,total,added,skipped,removed,wroteConfig,watchups}`。
+   失败分两类话术：`NO_LOGIN` → 「去『账号与登录』重新存一次 cookie」；
+   有 `apiCode` → 「多半是风控（-412）—— 过几分钟再点，别连着刷」。
+
+3. **`lib/client.js`：`WatchUpsEditor` 那一行由开关变按钮。**
+   删掉 `follows.enabled` 复选框（旧文案「自动同步她的关注」），换成
+   **「立即同步关注名单」** + 就地结果行（`✓ 新增 N 位：…` / `✓ 没有新关注（她现在关注 N 位）` /
+   `✗ … —— hint`）；新增了谁还会顺手 `reload()` 一次，让上面的名单立刻显示新条目 ✓
+
+4. **`tools/lib/config.mjs`**：`follows.enabled` 标注为**已废弃**（默认值保留，老配置不报错）；
+   `follows.topics` / `follows.maxAdd` 语义不变（仍只作用于新同步进来的条目）。
+
+### 验证
+
+- `tests/follows-route.test.mjs`（新，8 例）：假 `bili.mjs` 替身跑**真子进程**，验
+  ① 有新增 → 写便条且内容正确；② 参数契约 `['follows','sync','--go','--json']`；
+  ③ 没有新增 → **不动**便条（别擦掉上一条还没被读走的）；
+  ④ 未登录 → `ok:false` + cookie 指路 + 不留便条；⑤ 风控 → hint 里有"风控/-412"；
+  ⑥ GET → 405；⑦ 源码契约：`scheduler.js` 里 `kickFollowsSync|syncFollowsOnWake|FOLLOWS_SYNC_MS|syncFollows(` 全为零命中；
+  ⑧ 源码契约：`client.js` 有「立即同步关注名单」与 `/follows/sync`，旧开关文案已消失。
+- 全量 `node --test "tests/*.test.mjs"` → **279 tests / 279 pass / 0 fail**。
+- `lib/scheduler.js`、`lib/client.js`、`lib/index.js` 三个文件 `node --check` 全过。
+
+### 边界（诚实）
+
+- 按钮**只读**关注列表、**只写本地配置**：插件不点关注、不取关（那是改账号状态的动作 ✗）。
+- 取关**不会**从 `watchups` 删条目（你可能还想让她继续看那位的稿子），只在结果里报一句。
+- 改了 `lib/` 下两个文件 → **要重启 DSH** 才生效（`tools/` 下的改动不用）。
+
 ## v1.4.1（2026-10-25）修「-412 一整天不松手，她一天没发出去消息」
 
 主人原话：「-412 一整天都没松手，导致我的分身今天没发出去消息，有没有办法解决这个问题」。
