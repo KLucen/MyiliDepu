@@ -42,8 +42,13 @@ const logReq = (hit, p) => {
 const CACHEABLE = [
   /^\/x\/web-interface\/(wbi\/)?view$/,           // 视频元信息
   /^\/x\/space\/wbi\/acc\/info$/,                 // 用户信息
+  // 2026-10-25：UP 主投稿列表也进缓存（6 小时）——它是「重点关注名单」的轮询源，
+  //   反复拉同一份列表既不必要、又正是撞 412 的典型动作 ✗
+  /^\/x\/space\/wbi\/arc\/search$/,
   // 字幕/播放地址含短期授权，关注关系会变化，必须实时获取。
 ]
+// 投稿列表变化很慢；6 小时够了，而且同一天多次醒来只打一次网络 ✓
+const ARC_TTL_MS = 6 * 3600 * 1000
 // nav 只缓存 10 分钟（wbi 密钥会轮换），别放进 CACHE_TTL 那套 ✓
 const NAV_TTL_MS = 10 * 60 * 1000
 // 风控码：撞到就熔断
@@ -56,6 +61,57 @@ const BAN_CODES = new Set([-412, -352, -799, -509, -10403])
 //   所以：这两个端点上的 -412 只当「这条受限」，不熔断 ✓
 const CONTENT_RESTRICTED = [/^\/x\/player\/(wbi\/)?playurl$/]
 const isContentRestricted = (p) => CONTENT_RESTRICTED.some((re) => re.test(p))
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 2026-10-25 事故：关注同步每 5 分钟跑一次（relation/followings），撞 412 就把**全机**熔断
+//   5 分钟；下一轮 5 分钟后又开火 → 退避窗口首尾相接 → 一整天她的消息都发不出去 ✗
+//   根因有两层：① 轮询太密（已由 lib/scheduler.js 改成"只在醒来时、且 6 小时内至多一次"）
+//              ② 监控类端点**没有资格**拖住她写评论/发私信 → 它们自己退避，不动全局闸门 ✓
+// ─────────────────────────────────────────────────────────────────────────────
+const MONITOR_PATHS = [/^\/x\/relation\/followings$/, /^\/x\/space\/wbi\/arc\/search$/]
+const isMonitor = (p) => MONITOR_PATHS.some((re) => re.test(p))
+const MONITOR_BAN_FILE = path.join(HOME, '.bili-ai', 'api-ban-monitor.json')
+
+// 退避计数随时间衰减：超过 30 分钟没再犯就算新一轮
+//   （不衰减的话会一路棘轮：某端点犯几次 → 以后每次 412 都直接封顶 30 分钟 ✗）
+const STREAK_DECAY_MS = 30 * 60 * 1000
+function freshStreak(file) {
+  const b = readJson(file, {})
+  const at = Date.parse(b.at ?? '') || 0
+  if (!at) return Number(b.streak ?? 0)   // 老格式没有 at：没有时间信息就不猜，按原样用
+  return Date.now() - at < STREAK_DECAY_MS ? Number(b.streak ?? 0) : 0
+}
+function backoffMins(streak) { return Math.min(30, 5 * 2 ** Math.max(0, streak - 1)) }
+
+/** 熔断闸门：监控类只封自己，其它端点封全机。返回封了多少分钟。 */
+function armBackoff(pathname, why, off) {
+  if (off) return 0
+  const file = isMonitor(pathname) ? MONITOR_BAN_FILE : BAN_FILE
+  const streak = freshStreak(file) + 1
+  const mins = backoffMins(streak)
+  writeJson(file, { until: Date.now() + mins * 60_000, why, at: new Date().toISOString(), streak, endpoint: pathname })
+  return mins
+}
+function clearStreakFor(pathname) {
+  for (const file of [BAN_FILE, MONITOR_BAN_FILE]) {
+    const b = readJson(file, {})
+    if (b.streak && b.endpoint === pathname) writeJson(file, { ...b, streak: 0 })
+  }
+}
+function banState(file) {
+  const b = readJson(file, {})
+  const until = Number(b.until ?? 0)
+  const left = Math.max(0, until - Date.now())
+  return { banned: left > 0, minutesLeft: left > 0 ? Math.ceil(left / 60000) : 0, why: b.why ?? null, at: b.at ?? null, endpoint: b.endpoint ?? null, streak: freshStreak(file) }
+}
+/** 排障/体检用：全机闸门 + 监控闸门各自的状态 */
+export function apiBanState() { return { global: banState(BAN_FILE), monitor: banState(MONITOR_BAN_FILE) } }
+/** 立刻解封（失败退避是可恢复状态，不是惩罚；主人等不及就该能一把清掉）✓ */
+export function clearApiBan() {
+  const before = apiBanState()
+  for (const file of [BAN_FILE, MONITOR_BAN_FILE]) { try { fs.rmSync(file, { force: true }) } catch {} }
+  return before
+}
 
 function readJson(file, fallback) {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')) } catch { return fallback }
@@ -107,9 +163,6 @@ function bannedUntilNow() {
   const b = readJson(BAN_FILE, {})
   return Number(b.until ?? 0) > Date.now() ? Number(b.until) : 0
 }
-function setBan(ms, why) {
-  writeJson(BAN_FILE, { until: Date.now() + ms, why, at: new Date().toISOString() })
-}
 
 // 说明：读失败仍返回 {code, message} 这种形状，让每个调用方自己决定
 // 「元信息必需」还是「可选」。cookie 和响应正文永远不会进日志。
@@ -140,13 +193,13 @@ export async function apiGet(input, headers = {}, opts = {}) {
     // 熔断期间：能吃到缓存就吃 ✓ 吃不到就明确失败 ✓
     const hit = stale()
     if (hit) return hit
-    return { code: -412, message: `HTTP 412 —— 本机被 B站 限流了，约 ${mins} 分钟后自动恢复（期间用缓存过日子）` }
+    return { code: -412, message: `HTTP 412 —— 本机被 B站 限流了，约 ${mins} 分钟后自动恢复（期间用缓存过日子；想立刻解封：bili unban）` }
   }
 
   // ② 缓存命中
   if (!noCache && canCache && !noCacheEnv()) {
     const hit = readJson(CACHE_FILE, {})[key]
-    const useTtl = isNav(url.href) ? NAV_TTL_MS : ttl
+    const useTtl = isNav(url.href) ? NAV_TTL_MS : (url.pathname === '/x/space/wbi/arc/search' ? Math.min(ttl, ARC_TTL_MS) : ttl)
     if (hit && Date.now() - Number(hit.at ?? 0) < useTtl) { logReq(true, url.pathname); return { ...hit.data, _cached: true } }
   }
 
@@ -171,14 +224,12 @@ export async function apiGet(input, headers = {}, opts = {}) {
 
     // HTTP 412/429：平台级风控 → 熔断（默认 5 分钟，指数退避封顶 30 分钟）
     if (biliHost && (response.status === 412 || response.status === 429)) {
-      const prev = readJson(BAN_FILE, {})
-      const streak = Number(prev.streak ?? 0) + 1
-      const mins = Math.min(30, 5 * 2 ** (streak - 1))
-      if (!noCacheEnv()) setBan(mins * 60_000, `HTTP ${response.status}`)
-      if (!noCacheEnv()) writeJson(BAN_FILE, { ...readJson(BAN_FILE, {}), streak, endpoint: url.pathname })
+      const mins = armBackoff(url.pathname, `HTTP ${response.status}`, noCacheEnv())
       const hit = stale()
       if (hit) return hit
-      return { code: -412, message: `HTTP ${response.status}（B站 风控）—— 已熔断 ${mins} 分钟，别再打了` }
+      return isMonitor(url.pathname)
+        ? { code: -412, message: `HTTP ${response.status}（B站 对「看别人更新」这类接口限流了）—— 只看不写的那部分退避 ${mins} 分钟，**不影响她发评论/私信**` }
+        : { code: -412, message: `HTTP ${response.status}（B站 风控）—— 已熔断 ${mins} 分钟，别再打了（想立刻解封：bili unban）` }
     }
     if (!response.ok) return { code: -1, message: `HTTP ${response.status}（B站风控或接口异常，请稍后重试；见 README 排障）` }
 
@@ -197,16 +248,14 @@ export async function apiGet(input, headers = {}, opts = {}) {
       if (Number(data.code) === -412 && isContentRestricted(url.pathname)) {
         return { ...data, message: `${data.message ?? ''}（这条播放地址受限：大会员专属/地区限制，不是限流）` }
       }
-      const prev = readJson(BAN_FILE, {})
-      const streak = Number(prev.streak ?? 0) + 1
-      const mins = Math.min(30, 5 * 2 ** (streak - 1))
-      if (!noCacheEnv()) writeJson(BAN_FILE, { until: Date.now() + mins * 60_000, why: `code=${data.code}`, at: new Date().toISOString(), streak, endpoint: url.pathname })
-      return { ...data, message: `${data.message ?? ''}（B站 风控 ${data.code}）—— 已熔断 ${mins} 分钟` }
+      const mins = armBackoff(url.pathname, `code=${data.code}`, noCacheEnv())
+      return isMonitor(url.pathname)
+        ? { ...data, message: `${data.message ?? ''}（B站 对「看别人更新」这类接口限流了 ${data.code}）—— 只看不写的那部分退避 ${mins} 分钟，不影响她发文` }
+        : { ...data, message: `${data.message ?? ''}（B站 风控 ${data.code}）—— 已熔断 ${mins} 分钟` }
     }
     // 成功了：清掉退避计数，并写缓存
     if (Number(data.code) === 0) {
-      const b = readJson(BAN_FILE, {})
-      if (!noCacheEnv() && b.streak && b.endpoint === url.pathname) writeJson(BAN_FILE, { ...b, streak: 0 })
+      if (!noCacheEnv()) clearStreakFor(url.pathname)
       if (!noCache && canCache && !noCacheEnv()) {
         const store = readJson(CACHE_FILE, {})
         store[key] = { at: Date.now(), data }
@@ -227,13 +276,14 @@ export async function apiGet(input, headers = {}, opts = {}) {
 
 // 给「依赖体检 / 排障」用的现状
 export function apiState() {
-  const ban = readJson(BAN_FILE, {})
   const cache = readJson(CACHE_FILE, {})
-  const until = Number(ban.until ?? 0)
+  const g = banState(BAN_FILE)
   return {
-    banned: until > Date.now(),
-    banMinutesLeft: until > Date.now() ? Math.ceil((until - Date.now()) / 60000) : 0,
-    banWhy: ban.why ?? null,
+    banned: g.banned,
+    banMinutesLeft: g.minutesLeft,
+    banWhy: g.why,
+    banEndpoint: g.endpoint,
+    monitor: apiBanState().monitor,
     cacheEntries: Object.keys(cache).length,
   }
 }

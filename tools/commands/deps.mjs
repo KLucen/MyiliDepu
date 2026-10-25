@@ -132,9 +132,10 @@ try {
     name: 'B站 限流',
     ok: !st.banned,
     detail: st.banned
-      ? `熔断中，约 ${st.banMinutesLeft} 分钟后恢复（原因 ${st.banWhy ?? '-'}）；缓存里 ${st.cacheEntries} 条可撑`
-      : `正常 · 元信息缓存 ${st.cacheEntries} 条`,
-    fix: '等它自己恢复（5→10→20→30 分钟退避）；期间只读缓存，别手动狂点',
+      ? `熔断中，约 ${st.banMinutesLeft} 分钟后恢复（原因 ${st.banWhy ?? '-'}${st.banEndpoint ? ' · ' + st.banEndpoint : ''}）；缓存里 ${st.cacheEntries} 条可撑`
+      : `正常 · 元信息缓存 ${st.cacheEntries} 条` + (st.monitor?.banned ? `（监控接口另在退避，剩 ${st.monitor.minutesLeft} 分钟，不影响她发文）` : ''),
+    fix: 'bili unban 可以立刻解封；等它自己恢复是 5→10→20→30 分钟退避。'
+      + '如果一天里反复被封，先看是不是监控类轮询太密（v1.4.1 起关注同步只在醒来时、6 小时至多一次）',
   })
 } catch {}
 
