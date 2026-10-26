@@ -124,6 +124,35 @@ try {
   })
 }
 
+// 2026-10-26：账本锁（她读原文/学习那条路上的 PERSISTENT_PAUSE）也要报出来 ——
+//   之前只有"她的消息发不出去"时才知道被封，而账本锁会让她**连学都学不了**，
+//   主人却只能在私信里收到一段 node --input-type=module -e … 的长命令 ✗
+try {
+  const { existsSync } = await import('node:fs')
+  const { join } = await import('node:path')
+  const dir = dataPath()
+  if (existsSync(join(dir, 'ledger.sqlite'))) {
+    const { Store } = await import('../../lib/reading/store.mjs')
+    const { describePause, isCredentialPause } = await import('../../lib/reading/pause-heal.mjs')
+    const pause = new Store(dir).getControl('pause')
+    items.push({
+      name: '账本锁',
+      ok: !pause,
+      detail: describePause(pause),
+      fix: isCredentialPause(pause?.reason)
+        ? '去设置页更新 cookie；更新完 v1.4.3 起它会自己开（凭据比锁新就自动开）。想立刻开：node bili.mjs unban'
+        : 'node bili.mjs unban 可以立刻开（风控类的锁不会自己开，得你确认）',
+    })
+  }
+} catch (e) {
+  items.push({
+    name: '账本锁',
+    ok: false,
+    detail: '读不出来：' + String(e?.message ?? e).slice(0, 160),
+    fix: 'node bili.mjs unban status 看详细；账本在 ' + dataPath(),
+  })
+}
+
 // 2026-10-22：把「接口缓存 / 熔断」现状也列出来 ——
 //   被 412 限流时最想知道的就是「还要等多久」和「缓存里还有多少能撑」
 try {

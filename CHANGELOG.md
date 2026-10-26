@@ -1,3 +1,49 @@
+## v1.4.3（2026-10-26）凭据类的锁会自己开；`unban` 两把锁一起开
+
+主人原话（2026-10-26）：「开始cookie过期了，我更新过后提示我开锁
+`node --input-type=module -e "import {Store} from 'file:///C:/Users/KLucen/.dsh/profiles/desktop/node_modules/dsh-myilidepu/lib/reading/store.mjs'; const s=new Store('D:/MyDepu'); … s.resume() …"`」
+
+### 事故链（真机事实）
+
+- 12:32:02 `network.mjs` 收到 `-101`（账号未登录）→ `store.pause("API_-101")` → 账本锁死。
+- 12:54:23 主人在设置页更新了 cookie（凭据文件 mtime 晚于锁 22 分钟）。
+- 但**锁与凭据之间没有任何联系**：`Store.resume()` 只被"受信任的本地 CLI"调用，
+  而唯一能碰到它的命令当时只有风控闸门那个 `unban`（它读的是 `tools/lib/bili-api.mjs`
+  的 api-ban，**完全不碰账本** ✗）。
+- 结果：她读不了原文、学习整条路停摆，只能干看着；最后她在私信里塞给主人一段长命令
+  让主人手动改库 ✗✗ —— 既难抄、又容易抄错路径，而且把"主人该做什么"教歪了。
+
+### 改了什么
+
+1. **新增 `lib/reading/pause-heal.mjs`**：`CREDENTIAL_PAUSE_REASONS`（凭据类：`CREDENTIAL_INVALID`
+   / `CREDENTIAL_DISABLED` / `API_-101` / `API_-400` / `API_-403`）与 `RISK_PAUSE_REASONS`
+   （风控类：`HTTP_412` / `HTTP_429` / `API_-352` / `API_-509` / `API_-799` / `NON_JSON_CHALLENGE`
+   / `API_CHALLENGE`）分开；`describePause()` 把锁翻成人话；
+   `healStaleCredentialPause(store, credentialPath)`：凭据类比锁新 → `store.resume()`。
+2. **接进两处**（都要在 `store.start()` 之前，否则永远到不了）：
+   - `lib/reading/service.mjs` 的 `task()` 开头；
+   - `lib/reading/network.mjs` 的构造函数（`store.start()` 之后才建 Network，这里是第二道保险）。
+3. **`tools/commands/unban.mjs` 重写**：除风控闸门外，同时读账本 `control.pause` 并清掉；
+   `unban status` 只看不动；`--json` 带 `ledger:{readable,cleared,before}`；
+   没有 `ledger.sqlite` 时**不创建**目录（新装机不能因为看一眼状态就多出一个数据目录 ✗）。
+4. **`tools/commands/deps.mjs` 新增「账本锁」一行**：被锁时直接给出原因 + 该跑的命令。
+5. **`prompts/AGENTS.md` §4**：被锁时**不许给主人贴长命令**（更不许教主人 `node -e` 改库），
+   只请主人更新 cookie + 跑 `unban`；并写明 `unban` 是**主人的**开关，她自己不许动。
+
+### 验证
+
+- 新增 `tests/pause-heal.test.mjs`（9 例）：凭据类锁 + 凭据更新 → 开；凭据没动 → 保持；
+  风控类锁 → **绝不**开；无锁 / 凭据缺失 → 不抛；真 `Store` 写读；`Service.candidates(1)`
+  在陈旧锁下能跑通且锁被清；`bili unban --json` **真子进程**清库；`unban status` 不改状态。
+- 真机：锁着 `API_-101`（12:32）的状态下直接跑 `bili candidates --count 1` →
+  **自动开锁并正常返回候选**；随后 `unban status` 显示「没有锁 ✓」，`deps` 全绿。
+- 全量回归：`node --test "tests/*.test.mjs"` → **288 tests / 288 pass / 0 fail**（v1.4.2 时为 279）。
+
+### 边界
+
+- 自动开锁**只认"凭据文件 mtime 晚于锁"**这一条证据；主人没动过凭据就绝不开（免得白撞一次）。
+- 风控类锁只能等退避或由主人 `bili unban` —— 代码里**没有**任何自动开它的路径。
+
 ## v1.4.2（2026-10-25）关注同步改成设置页里的一个按钮
 
 主人原话：「修改关注同步逻辑，将关注同步做成一个按钮放在 dsh 的我的分身的设置里，
