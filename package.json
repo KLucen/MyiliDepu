@@ -1,6 +1,6 @@
 {
   "name": "dsh-myilidepu",
-  "version": "1.4.3",
+  "version": "1.5.0",
   "description": "给 DSH 装一个 B 站分身：白天学习人类世界，晚上按生物钟看片、写两本日记，把值得的 @ 你。合并自 dsh-bili-whale（身体）与 dsh-bili-humanism（灵魂）。",
   "keywords": [
     "dsh",

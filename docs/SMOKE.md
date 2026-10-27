@@ -204,7 +204,7 @@ node tools/bili.mjs session
 | `登录态无效: code=-101 账号未登录（cookie 过期或抄错，重新复制一次）` | 4 | cookie 过期（最常见） |
 | `手机绑定  : 否 ← 会被拒` | 0 | 能读，但发评论/动态会被平台拒 |
 
-**失败怎么办**：设置页重新粘贴 `SESSDATA` / `bili_jct`（`buvid3` 可留空）→ 重跑。显示的是主号 → 换小号，别拿主号做冒烟。手机未绑定 → 先在 B 站客户端绑手机，否则 Q8 的评论一定失败。
+**失败怎么办**：设置页重新粘贴 `SESSDATA` / `bili_jct`（`buvid3` 可留空）→ 重跑；**或者直接点「生成二维码」用手机 B 站 扫一下**（v1.5.0 起，最省事）。显示的是主号 → 换小号，别拿主号做冒烟。手机未绑定 → 先在 B 站客户端绑手机，否则 Q8 的评论一定失败。
 
 ---
 
@@ -893,7 +893,7 @@ node tools/bili.mjs notify --test
 | **`✗ node 运行时 — 这个不是 node：<路径>（会静默返回空输出）`**；她永远不醒、命令没反应 | DSH 里 `process.execPath` 指向 Electron 主程序，不是真 node；或 `DSH_NODE` 指错了 | 设环境变量 `DSH_NODE` 指向真 node 的**绝对路径**，然后**重启 DSH**。本机在 `C:\Users\KLucen\AppData\Local\Author Software\nvm\.nodejs\node.exe`（v24.20.0） |
 | **`HTTP 412 —— 本机被 B站 限流了，约 N 分钟后自动恢复（期间用缓存过日子）`**；`deps` 里「B站 限流」显示熔断 | IP 级风控（非官方接口的日常）。`-412` 还会以 HTTP 200 + `code=-412` 的形式出现 | **停手等**。退避 5→10→20→30 分钟封顶，用 `deps` 看还剩几分钟。别换接口、别狂点——412 是 IP 级的，换接口救不了。排障可临时 `BILI_NO_CACHE=1` 强制走真网络 |
 | **`WBI 签名不可用：<message>`**；或 `WBI 签名密钥缺失，请稍后重试或检查登录状态` | 拿不到 `nav.data.wbi_img` 的密钥（nav 被风控 / 未登录） | 先 `node tools/bili.mjs session` 确认登录态；再 `recon <BV>` 看 `=== WBI 签名材料 ===` 那段有没有 `img_key`/`sub_key`/`mixin`。密钥会轮换，别缓存 |
-| **`登录态无效: code=-101 账号未登录`（退出码 4）** | `SESSDATA` 过期 | 设置页重新粘贴 cookie（勾"记住我/长期"）。**写操作前先跑 `session`** |
+| **`登录态无效: code=-101 账号未登录`（退出码 4）** | `SESSDATA` 过期 | **先试扫码**：设置页「B站 登录态」→「生成二维码」→ 手机 B 站 App 扫 → 确认（v1.5.0 起）。手填则重新粘贴 cookie（勾"记住我/长期"）。**写操作前先跑 `session`** |
 | **发评论 / 私信返回 `code=-111`**（只读全绿，一发就挂） | `bili_jct` 空着、被截断，或和 `SESSDATA` 不是同一个号 | `selftest` 里 `bili_jct（写操作）` 那行会标出来（正常 32 位十六进制）。设置页整个 cookie 重粘一次。这个只能靠一次真实写入才能最终确认 |
 | **设置页 404 / 打开是空白** | ① 改完插件代码没重启 DSH；② 插件装在别的 profile（本机是 `desktop`）；③ 走的是非 loopback 地址 | 完整重启 DSH；`Get-Item "$env:USERPROFILE\.dsh\profiles\desktop\node_modules\dsh-myilidepu"` 确认链接在；用 `127.0.0.1` 而不是局域网 IP 访问 |
 | **`duplicate JSONL session id`**；她有两个会话 / 会话不见了 | 数据目录搬过家，同一个会话 id 在新旧两个工作目录桶里各有一份 | ① 确认当前数据目录（Q10）；② 她的会话目录应该在 `…\sessions\--<新数据目录转义>--\myilidepu`（本机 `--D-MyDepu-work--`）；③ 把旧桶那份**整个目录移走**（别删）；④ 重启 DSH 再确认只剩一个。会话文件是 `session.v4.jsonl.zstd`，移走不丢数据 |

@@ -1,3 +1,65 @@
+## v1.5.0（2026-10-27）扫码登录：cookie 过期，手机扫一下就能换新
+
+主人原话（2026-10-27）：「为解决后面cookie过期后要重新登录，能不能给插件加入一个扫码二维码登录功能，
+在身份过期后，直接用b站账号扫插件的二维码就可以更新cookie」
+
+### 为什么值得做
+
+上一版（v1.4.3）解决了「换完 cookie 锁还锁着」，但**换 cookie 本身仍然要手抄**：
+主人得在浏览器开发者工具里翻 `SESSDATA`（长、带 `%2C`、极易抄错）与 `bili_jct`（32 位十六进制），
+抄错一位的症状是 `-101`，看起来和"没登录"一模一样，排查成本很高。
+扫码把这一步降到"点一下 + 扫一下"。
+
+### 接口契约（2026-10-27 本机真跑，非猜测）
+
+| 步骤 | 请求 | 关键返回 |
+|---|---|---|
+| 取码 | `GET passport.bilibili.com/x/passport-login/web/qrcode/generate` | `data.url`（131 字符的 `account.bilibili.com/h5/account-h5/auth/scan-web?…&qrcode_key=…`）、`data.qrcode_key` |
+| 轮询 | `GET passport.bilibili.com/x/passport-login/web/qrcode/poll?qrcode_key=…` | `data.code`：`0` 成功 / `86038` 已失效 / `86090` 已扫码未确认 / `86101` 未扫码 |
+| 补 buvid3 | `GET api.bilibili.com/x/frontend/finger/spi` | `data.b_3`（46 字符） |
+
+- 同一 `qrcode_key` 可反复轮询；**有效期 180 秒**。
+- 成功时凭据**有两个来源**：响应头 `Set-Cookie`（`SESSDATA` / `bili_jct` / `DedeUserID` / `DedeUserID__ckMd5`），
+  以及 `data.url` 那条 `passport.biligame.com/crossDomain?…&SESSDATA=…&bili_jct=…` 的查询串。
+  **两条都解析**（实测 `getSetCookie()` 在某些运行时不返回数组，只认一条会莫名失败）。
+- 请求要带浏览器 UA + `referer`/`origin: https://www.bilibili.com/`（裸请求会被拦）。
+
+### 改了什么
+
+1. **新增 `lib/qr.mjs`（零依赖二维码编码器）**：`qrMatrix(text, {ec})` / `qrSvg(text, {ec, scale, margin})`。
+   - 版本 1–10、纠错 L/M/Q/H、byte 模式、8 种掩码 + 罚分选优、RS 纠错、版本号与格式信息。
+   - **不走第三方图床、不加依赖**：二维码在本地生成，主人扫的码不经过任何外部服务 ✓。
+   - 写它时踩到并修掉的三个真 bug：`if (!EC_FORMAT_BITS[ec])` 把 **M 档（format bits = 0）**误判为非法；
+     N3 罚分越界读；以及**码字没有按块交织**（只有单块版本能解码）。
+   - 验证方式：内置解码器单测（`tests/qr.test.mjs`，13 例）+ **OpenCV 真解码**（版本 8 / mask 2 也能解回原文）。
+2. **新增两条宿主路由**（`lib/index.js`）：
+   - `POST /dsh-bili/api/login/qr` → 取码并回 `{ok, svg, url, expiresIn: 180}`；
+   - `POST /dsh-bili/api/login/qr/poll` → 回 `{status: waiting|scanned|expired|ok|error}`。
+   - 两条都**只接受回环**（403）、**只接受 POST**（405）。
+   - `qrcode_key` **由宿主记着**，客户端传什么都不看 —— 否则这路由就成了「拿任意 key 换 cookie」的转发器 ✗。
+   - 成功才写凭据，且**只写 `sessdata` / `bili_jct` / `buvid3` 三个键**（`buvid3` 本地有就沿用，没有才取）；
+     文件 `0600`；写完立刻问一次 `nav` 确认能用，并刷新配置里的 `self`；在 `log.jsonl` 记 `login-qr` 一笔。
+   - **fail-closed**：成功码但 cookie 没给全 → **一个字节都不落盘**；响应体里**永不出现凭据值**。
+3. **设置页新增「扫码登录（换 cookie）」**（`lib/client.js` 的 `QrLogin`）：点「生成二维码」→ 出图（`data:image/svg+xml;base64,`）
+   → 每 2 秒轮询 → `scanned`/`waiting`/`expired`/`ok` 各有各的话；成功后顺手刷新「我是谁」。
+   宿主没重启时这条路由是 404 → 界面直接说「宿主还没重启 —— 这个按钮是 v1.5.0 新加的」，不说"宿主不支持"。
+4. **新增 `tests/qr-route.test.mjs`（12 例）**：假 `fetch` + 真路由（把 `USERPROFILE`/`HOME`/`DSH_HOME` 全指到临时箱，
+   **绝不碰主人真实凭据**）。覆盖四态、key 注入、两个凭据来源、fail-closed、nav 失败、405/403、凭据不回显、
+   以及源码契约（客户端不许在扫码流程里碰 `sessdata`；`lib/scheduler.js` 里的关注同步已彻底移除）。
+
+### 验证
+
+- `node --test "tests/*.test.mjs"` → **313 / 313 通过**（v1.4.3 是 288）。
+- 真机端到端：拿 B站 **实时的** `data.url`（131 字符）用 `lib/qr.mjs` 画成 456×456 PGM，
+  OpenCV **两个检测器都解回同一条 url** ✓（`QRCodeDetector` 与 `QRCodeDetectorAruco`）。
+- 实测取码/轮询响应：`generate` 200 且 `code:0`；`poll` 未扫码时 `code:0, data.code:86101`。
+
+### 边界（诚实说明）
+
+- 走的是 **B站 官方 passport 接口但非公开文档**：接口若改版，这条功能会失效（不影响其它功能）。
+- 扫码**只换登录态**：不点关注、不取关、不改账号设置、不发任何内容。
+- `lib/` 改动 **需要完全退出 DSH 再启动**才生效（客户端已专门提示 404 的含义）。
+
 ## v1.4.3（2026-10-26）凭据类的锁会自己开；`unban` 两把锁一起开
 
 主人原话（2026-10-26）：「开始cookie过期了，我更新过后提示我开锁
