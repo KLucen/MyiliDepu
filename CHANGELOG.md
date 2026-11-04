@@ -1,3 +1,46 @@
+## v1.5.1（2026-11-04）修「连着几天起不来」：模型 id 被 provider 改名后，醒来前先验真
+
+主人报告（2026-11-04）：「这几天的b站分身都是的情况：
+pi-ai provider "tencent" has no configured model "deepseek-v4.1-flash"，需要重新加载插件吗」
+
+### 根因（查实，不是猜）
+
+- provider `tencent` 现在配的模型是 `deepseek-v4.1-flash-1017` / `glm-5.3` / `kimi-k3` / `kimi-k3.1-pro` / `GLM-5.3-Flash`——
+  **`deepseek-v4.1-flash` 这个 id 已经被改名成 `-1017`**。
+- 她那个会话里存的还是旧 id（会话日志里最近三条成功 `request/header` 都是 `deepseek-v4.1-flash`），
+  于是每次醒来 `prompt()` 在起跑线就被宿主拒掉：`code: UNKNOWN_MODEL`。
+- 她那几天 4 轮全是 `turn/end { kind:'error', code:'UNKNOWN_MODEL' }`：没有一轮跑起来，
+  日记、学习、分享、私信一个都没发生 ✗。**重启 DSH / 重载插件都治不好**——坏的 id 不在插件里，
+  在 DSH 保存的「她这个会话用哪个模型」里，而插件当时 `model.enabled=false`，永不去覆盖它。
+- 而且这是**会重演**的：provider 一改名，任何"存了模型选择"的会话都会静默瘫掉。
+
+### 改了什么
+
+1. **新增 `lib/model-pick.mjs`**（纯函数，不碰 ctx、不发请求，11 例单测）：
+   - `parseUnknownModel()` 从宿主报错里抠出 provider / model（三种文案都认）；
+   - `isUnknownModelError()` 只认「模型不认识」——**429 / ECONNRESET 必须返回 false**，
+     否则会拿网络错误去换模型 ✗；
+   - `pickValidModel()` 的优先级：配的那对还在 → 原样用；model 没了 → **换同一 provider 的第一个**
+     （换 provider 等于换凭据，很可能直接没 key）；provider 也没了 → 跟着这个 model 走；
+     都没有 → 第一个有模型的 provider；一个能用的都没有 → `null`（不许硬试）。
+2. **醒来前验真**（`lib/scheduler.js` `applyModelOnWake()`）：先拉宿主模型目录，
+   配的模型不存在就自动换成同一 provider 现在有的那个，并记一行「模型已自动校正：…（理由）」。
+3. **撞上也不瘫**：新增 `sendPrompt()` 包住全部四处 `prompt()` 调用点（醒来 / 私信 / 监听 / 直播间）——
+   只有 `UNKNOWN_MODEL` 这一类会「换模型 → 重试一次」，其它错误原样抛出。
+4. 主人的真实配置已修：`model = { enabled:true, provider:'tencent', model:'deepseek-v4.1-flash-1017', reasoningEffort:'max' }`
+   （备份 `myilidepu.config.json.bak-2026-11-04-model`）。
+
+### 验证
+
+- `node --test tests/model-pick.test.mjs` → **12/12**（含一条源码契约：四处投递都走 `sendPrompt`、醒来前必验真）；全量 `node --test "tests/*.test.mjs"` → **325 tests / 325 pass**。
+- `node --check lib/scheduler.js lib/model-pick.mjs` → 通过。
+
+### 边界（诚实说）
+
+- 只能救「provider 里还有别的模型」的情形；整个 provider 都下线了 → 记日志并沿用当前模型，
+  不会替你猜一个可能没 key 的 provider ✗。
+- 改的是 `lib/`，**要完全退出 DSH 再启动**才生效；之后每次醒来都会自己验真，不用管。
+
 ## v1.5.0（2026-10-27）扫码登录：cookie 过期，手机扫一下就能换新
 
 主人原话（2026-10-27）：「为解决后面cookie过期后要重新登录，能不能给插件加入一个扫码二维码登录功能，
