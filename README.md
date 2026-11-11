@@ -15,6 +15,24 @@
 
 > **每次推送到本仓库，这一节都会写上「这一版改了什么」**；逐版本完整记录（含每一条的命令、行号与实测结果）见 [CHANGELOG.md](CHANGELOG.md)。
 
+**v1.6.0（2026-11-11）· 密钥失效/换模型：从 DSH 本地密钥库一键接上，模型可立即切换**
+
+- **你要求的**（原话）：「由于有时候 api 密钥会出现失效的情况，所以在插件中加入可以导入 dsh 本地的 apikey 和切换模型的功能」。
+- **新增「从 DSH 导入本地密钥」**：设置页「模型与密钥」里列出 DSH 凭据库（`~/.dsh/.credentials.yaml`）
+  和 profile 里 provider `apiKeyEnv` 已经有的**引用名**，标出「已配置/未配置」和「绑在哪个 provider」；
+  点 **「导入并使用」** 就把这个名字接到她的模型配置上并热生效 —— **不用把密钥再粘一遍**。
+- **只碰名字，不碰值**：响应里只有引用名与 `configured` 状态，密钥值一个字节都不经过插件、
+  也不落插件配置文件（测试把假密钥逐条塞进响应体检查，确保没有回显）。
+- **不骗人**：如果这个名字没有任何 provider 真的引用它（宿主调模型时仍会用别的 ref），
+  import 直接回 409 并列出真正绑定它的 provider，而不是给一个「导入成功」的假象。
+- **「立即切换」**：只切 provider / model / 推理档（不碰密钥输入框）；先按宿主模型目录验真，
+  id 被改过名的自动校正并如实提示（沿用 v1.5.1 的 `pickValidModel`）。
+- **新增两条接口**：`GET /dsh-bili/api/model` 多返回 `localKeys`（本机密钥名字目录 + provider 绑定 +
+  `configEditor` 可用性）；`POST /dsh-bili/api/model/import`（导入名字并热生效）；
+  `POST /dsh-bili/api/model/switch`（只换模型并热生效）。
+- 新增 7 例单测（假宿主 + 真 `.credentials.yaml` 夹具）：import 成功 / 未配置 400 / 无 provider 引用 409 /
+  switch 成功 / 模型改名自动校正 / configEditor 不可用时降级 —— 全量 **332 例通过**。
+
 **v1.5.1（2026-11-04）· 修「连着几天起不来」：模型 id 被改名后，醒来前先验真**
 
 - **你看到的**：`pi-ai provider "tencent" has no configured model "deepseek-v4.1-flash"`，

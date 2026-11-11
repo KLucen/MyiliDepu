@@ -8,13 +8,27 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import assert from 'node:assert/strict'
-import {test} from 'node:test'
+import {test, after} from 'node:test'
 import {Readable} from 'node:stream'
 
 // 配置隔离：必须在 import lib/index.js **之前**设 —— paths.mjs 在模块加载时就定了 DSH_HOME ✓
 const BOX = fs.mkdtempSync(path.join(os.tmpdir(), 'myilidepu-model-'))
 process.env.DSH_HOME = path.join(BOX, 'dsh')
 fs.mkdirSync(process.env.DSH_HOME, {recursive: true})
+// 「DSH 本地密钥」测试夹具：凭据库文件（只枚举名字，值不该出现在任何响应里）✓
+const FAKE_TENCENT = 'sk-fake-tencent-' + Date.now()
+const FAKE_DEEPSEEK = 'sk-fake-deepseek-' + Date.now()
+const FAKE_ORPHAN = 'sk-fake-orphan-' + Date.now()
+fs.writeFileSync(path.join(process.env.DSH_HOME, '.credentials.yaml'), [
+  'version: 1',
+  'refs:',
+  `  TENCENT_API_KEY: ${FAKE_TENCENT}`,
+  `  DEEPSEEK_API_KEY: ${FAKE_DEEPSEEK}`,
+  `  ORPHAN_API_KEY: ${FAKE_ORPHAN}`,
+  'records: {}',
+  '',
+].join('\n'), 'utf8')
+const CONFIGURED = ['TENCENT_API_KEY', 'DEEPSEEK_API_KEY', 'ORPHAN_API_KEY']
 
 // 调度器会在 apply() 里起定时器；测试里把定时器打桩，避免进程挂住 ✓
 //   注意返回对象要带 unref/ref：有些代码会对句柄调 .unref()，返回 undefined 会炸 ✓
@@ -31,9 +45,18 @@ const llmStub = {
   resolveModelInfo: async () => ({reasoning: {efforts: [{id: 'low', name: '低'}, {id: 'max', name: '最大'}]}}),
 }
 const credStub = {
-  describe: async (ref) => ({configured: ref === 'TENCENT_API_KEY', source: 'file', writable: true}),
+  describe: async (ref) => ({configured: CONFIGURED.includes(ref), source: 'file', writable: true}),
   set: async (ref, value) => { calls.set.push([ref, value]) },
   unset: async (ref) => { calls.unset.push(ref) },
+}
+// configEditor：provider 到底**实际引用**哪个凭据名（真实来源是 profile 的 apiKeyEnv）✓
+const editorStub = {
+  configuration: () => [{
+    entry: {options: {id: 'llm-pi-ai', config: {providers: {
+      tencent: {displayName: '腾讯', apiKeyEnv: 'TENCENT_API_KEY', models: ['deepseek-v4.1-flash']},
+      deepseek: {displayName: 'DeepSeek 官方', apiKeyEnv: 'DEEPSEEK_API_KEY', models: ['deepseek-chat']},
+    }}}},
+  }],
 }
 const scStub = {
   selectModel: async (arg) => { calls.selectModel.push(arg); return {provider: arg.provider, model: arg.model} },
@@ -42,6 +65,7 @@ const services = {
   llm: llmStub,
   credentials: credStub,
   sessionController: scStub,
+  configEditor: editorStub,
   // 信任栅栏：真实宿主里由 connection 服务提供，缺失时插件按 fail-closed 拒绝（503）✓
   connection: {requestRejection: () => null},
 }
@@ -85,7 +109,7 @@ test('GET /model：给出 provider 目录、模型列表、推理档与"配没�
   assert.deepEqual(r.data.providers[0].models.map((m) => m.id), ['deepseek-v4.1-flash'])
   assert.deepEqual(r.data.providers[1].models, [])
   assert.ok(r.data.suggestedRefs.includes('TENCENT_API_KEY'), '应能猜出引用名')
-  assert.deepEqual(r.data.services, {llm: true, credentials: true, sessionController: true})
+  assert.deepEqual(r.data.services, {llm: true, credentials: true, sessionController: true, configEditor: true})
   assert.equal(r.data.sessionId, 'myilidepu')
 })
 
@@ -183,4 +207,97 @@ test('宿主不支持会话级换模型时：保存成功但 applied=false + 给
   services.sessionController = scStub
 })
 
-fs.rmSync(BOX, {recursive: true, force: true})
+// ── 「导入 DSH 本地密钥」与「切换模型」（2026-11-11）────────────────────────────
+//   主人原话：「由于有时候 api 密钥会出现失效的情况，所以在插件中加入可以导入 dsh 本地的
+//   apikey 和切换模型的功能」
+//   守的两条底线：① 只碰名字/状态，凭据值一个字节都不回显；② provider 必须真的引用那个名字，
+//   否则"导入成功"是假象（宿主调用模型仍会用别的 ref）✗
+
+test('GET /model：列出本机密钥名字（只有名字，一个值都不回显）', async () => {
+  const r = await call('/dsh-bili/api/model')
+  assert.equal(r.status, 200)
+  const lk = r.data.localKeys
+  assert.ok(lk, '响应里要有 localKeys')
+  assert.deepEqual(lk.refs.map((x) => x.ref).sort(), ['DEEPSEEK_API_KEY', 'ORPHAN_API_KEY', 'TENCENT_API_KEY'])
+  assert.equal(lk.configEditor.available, true)
+  assert.equal(lk.refs.find((x) => x.ref === 'TENCENT_API_KEY').bound, true)
+  assert.equal(lk.refs.find((x) => x.ref === 'ORPHAN_API_KEY').configured, true)
+  assert.equal(lk.refs.find((x) => x.ref === 'ORPHAN_API_KEY').bound, false)
+  for (const secret of [FAKE_TENCENT, FAKE_DEEPSEEK, FAKE_ORPHAN]) {
+    assert.equal(r.text.includes(secret), false, '响应体里绝不能出现凭据值')
+  }
+})
+
+test('POST /model/import：把凭据库里已有的名字接上，并切到真正引用它的 provider', async () => {
+  const r = await call('/dsh-bili/api/model/import', {method: 'POST', body: {ref: 'DEEPSEEK_API_KEY'}})
+  assert.equal(r.status, 200)
+  assert.equal(r.data.ok, true)
+  assert.equal(r.data.model.provider, 'deepseek', '有 provider 真的引用这个名 → 切过去')
+  assert.equal(r.data.model.model, 'deepseek-chat', '模型用该 provider 声明的第一个')
+  assert.equal(r.data.model.apiKeyEnv, 'DEEPSEEK_API_KEY')
+  assert.equal(r.data.model.enabled, true)
+  assert.equal(r.data.applied, true)
+  assert.equal(calls.selectModel.at(-1).provider, 'deepseek')
+  assert.equal(calls.selectModel.at(-1).sessionId, 'myilidepu')
+  assert.match(r.data.detail, /已接上/)
+  for (const secret of [FAKE_TENCENT, FAKE_DEEPSEEK, FAKE_ORPHAN]) assert.equal(r.text.includes(secret), false)
+})
+
+test('POST /model/import：凭据库里没值的引用名 → 400（别存个"看起来配好了"的坏配置）', async () => {
+  const r = await call('/dsh-bili/api/model/import', {method: 'POST', body: {ref: 'NOPE_API_KEY'}})
+  assert.equal(r.status, 400)
+  assert.match(r.data.error, /凭据库里没有/)
+  // 配置不能被改坏：仍然指着上一个能用的组合
+  const saved = JSON.parse(fs.readFileSync(cfgFile(), 'utf8'))
+  assert.equal(saved.model.apiKeyEnv, 'DEEPSEEK_API_KEY')
+})
+
+test('POST /model/import：没有任何 provider 引用这个名字 → 409 + 说清为什么', async () => {
+  const r = await call('/dsh-bili/api/model/import', {method: 'POST', body: {ref: 'ORPHAN_API_KEY'}})
+  assert.equal(r.status, 409)
+  assert.match(r.data.error, /没有被 provider/)
+  assert.match(r.data.error, /没有任何 provider 引用它/)
+})
+
+test('POST /model/switch：只切模型，验真后热生效（密钥引用名跟着 provider 走）', async () => {
+  const r = await call('/dsh-bili/api/model/switch', {
+    method: 'POST',
+    body: {provider: 'tencent', model: 'deepseek-v4.1-flash', reasoningEffort: 'max'},
+  })
+  assert.equal(r.status, 200)
+  assert.equal(r.data.applied, true)
+  assert.equal(r.data.model.provider, 'tencent')
+  assert.equal(r.data.model.apiKeyEnv, 'TENCENT_API_KEY')
+  assert.equal(r.data.model.reasoningEffort, 'max')
+  assert.deepEqual(r.data.efforts.map((e) => e.id), ['low', 'max'])
+  assert.deepEqual(calls.selectModel.at(-1), {
+    sessionId: 'myilidepu', provider: 'tencent', model: 'deepseek-v4.1-flash', reasoningEffort: 'max',
+  })
+})
+
+test('POST /model/switch：模型 id 改过名 → 自动校正成同一 provider 还在的那个', async () => {
+  const r = await call('/dsh-bili/api/model/switch', {
+    method: 'POST',
+    body: {provider: 'tencent', model: 'deepseek-v4.1-flash-OLD'},
+  })
+  assert.equal(r.status, 200)
+  assert.equal(r.data.model.model, 'deepseek-v4.1-flash')
+  assert.notEqual(r.data.warn, null, '要告诉用户"自动换过"')
+  assert.match(String(r.data.warn), /已经没有/)
+  assert.match(r.data.detail, /已切到/)
+})
+
+test('GET /model：configEditor 不可用时，provider 绑定退回按名字猜，页面不炸', async () => {
+  delete services.configEditor
+  const r = await call('/dsh-bili/api/model')
+  assert.equal(r.status, 200)
+  assert.equal(r.data.localKeys.configEditor.available, false)
+  const tencent = r.data.localKeys.refs.find((x) => x.ref === 'TENCENT_API_KEY')
+  assert.equal(tencent.guessed, true, '没有权威来源就标"猜的"')
+  assert.equal(tencent.bound, false)
+  services.configEditor = editorStub
+})
+
+// 清理必须放在 after() 里：顶层 rmSync 会在**测试开跑之前**就把隔离目录（含 .credentials.yaml
+// 夹具）删掉 —— 文件级 test() 只是注册，顶层代码先跑完才执行用例（2026-11-11 踩过 ✗）
+after(() => fs.rmSync(BOX, {recursive: true, force: true}))

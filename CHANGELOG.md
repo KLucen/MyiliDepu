@@ -1,3 +1,53 @@
+## v1.6.0（2026-11-11）导入 DSH 本地 apikey + 切换模型
+
+主人要求（2026-11-11，原话）：「由于有时候 api 密钥会出现失效的情况，所以在插件中加入可以导入
+dsh 本地的 apikey 和切换模型的功能」
+
+### 做了什么
+
+1. **列本机已有密钥名字**（`lib/index.js:627 localRefNames()` / `:662 providerKeyMap()` /
+   `:719 localKeyDirectory()`）：
+   - 名字来源三个：profile 里 `llm-pi-ai` 条目的 `config.providers[id].apiKeyEnv`（权威绑定，经
+     `ctx.get('configEditor').configuration()`，:662）；`guessRef(provider)` 兜底（:701 用到）；
+     以及 `$DSH_HOME/.credentials.yaml` 的 `refs:` 分节（:627，只认**恰好两格缩进**的 key 行，
+     多行值/注释/未知键一律跳过 —— 宁可少列名字，也绝不读值）。
+   - 每个名字用 `credentials.describe(ref)` 只回 `configured/source/writable`（:591 `keyState` 原有），
+     并标记 `bound/guessed` 与绑到哪些 provider。
+   - `GET /dsh-bili/api/model` 新增 `localKeys`（:932 之前段）与 `services.configEditor` 可用性；
+     `suggestedRefs` 改为从 localKeys 汇总（不再只给一个猜的名字）。
+2. **导入名字并热生效**（`POST /dsh-bili/api/model/import`，`lib/index.js:932`）：
+   - 校验名字格式 + `credentials.describe(ref).configured === true`（否则 400「凭据库里没有值」）；
+   - provider 选择顺序：body.provider 提示 → 引用该名字的 provider（多个时优先当前）→ 当前 provider；
+     若最终 provider 实际引用的名字 ≠ ref → **409 并列出真正绑定它的 provider**（:701
+     `pickImportProvider`，不允许「导入成功但宿主仍用别的 ref」的假象）；
+   - model 沿用当前有效组合 → 该 provider 声明/目录的第一个；推理档不在该模型支持列表就置空；
+   - 写 `model={enabled:true, provider, model, apiKeyEnv:ref}` 后 `applyModelNow()` 热切她的会话。
+3. **只切模型并热生效**（`POST /dsh-bili/api/model/switch`，`lib/index.js:1006`）：
+   - 用 v1.5.1 的 `pickValidModel()` 按宿主目录验真（模型改名自动校正、`warn` 如实提示）；
+   - effort 白名单 + 该模型 `resolveModelInfo().reasoning.efforts` 校验；
+   - `apiKeyEnv` 用该 provider 的权威绑定（拿不到 configEditor 则 `guessRef`，再退旧值）。
+4. **设置页**（`lib/client.js` `ModelEditor`，:665 / :741 importKey / :769 switchNow / :848 导入行 /
+   :917 立即切换）：
+   - 「从 DSH 导入本地密钥」行：引用名 + provider 徽标 + 已配置/未配置 + 「导入并使用」（未配置禁用）；
+     空列表给提示，`configEditor` 不可用时标「绑定是猜的」；
+   - provider 下拉标「（密钥未配置）」；「保存并应用」旁边加「立即切换」（只切模型，不碰密钥输入）；
+   - 导入成功后把 `model.*` 同步回表单并重载目录。
+5. **测试**（`tests/model.test.mjs`）：夹具在 `import lib/index.js` 之前写 `$DSH_HOME/.credentials.yaml`
+   （`version:1` + `refs:` 三条假密钥 + `records: {}`）；`editorStub.configuration()` 提供
+   provider→apiKeyEnv 绑定；新增 7 例：GET 只列名字不泄值 / import 成功切到真绑定的 provider /
+   import 未配置 400 / import 无 provider 引用 409 / switch 成功 / switch 改名自动校正 / configEditor 缺失降级。
+   - 顺手修了本文件既有的**清理时机 bug**：`fs.rmSync(BOX)` 原来写在顶层，而 `test()` 只是注册，
+     顶层代码先跑完 → 隔离目录（含 `.credentials.yaml` 夹具）在用例开跑前就被删掉；改为
+     `after(() => fs.rmSync(BOX))` ✗→✓。
+6. 版本 `1.5.1` → `1.6.0`。
+
+### 验证
+
+- `node --test "tests/*.test.mjs"` → **332 tests / 332 pass / 0 fail**（12.5s）。
+- 实现期踩过的一个事故（记下来防复发）：把新的 creds 路径常量也叫 `CRED_FILE` 会**词法遮蔽**
+  模块级 `CRED_FILE`（`:75`，B站 cookie 的 `~/.bili-ai/credentials.json`），导致扫码/人格/日记 7 例全崩；
+  已改名 `DSH_CRED_YAML`（`:614`）并加注释。
+
 ## v1.5.1（2026-11-04）修「连着几天起不来」：模型 id 被 provider 改名后，醒来前先验真
 
 主人报告（2026-11-04）：「这几天的b站分身都是的情况：
